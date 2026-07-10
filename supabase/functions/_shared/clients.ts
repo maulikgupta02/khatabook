@@ -25,3 +25,12 @@ export function randomPassword(length = 10) {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
+
+// Long, unguessable, URL-safe token for public bill links -- this is the only thing
+// standing between "anyone with the link" and "anyone who can enumerate", so it needs
+// to be long and drawn from a real CSPRNG, not the shorter human-typed password alphabet.
+export function randomToken(length = 32) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}

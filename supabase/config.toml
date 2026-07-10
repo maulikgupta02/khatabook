@@ -360,6 +360,11 @@ allow_dynamic_registration = false
 [functions.resolve-customer-login]
 verify_jwt = false
 
+# resolve-bill-token is the public no-login bill link -- the token itself is the
+# credential, so it can't require a signed-in session either.
+[functions.resolve-bill-token]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -4,7 +4,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { functionErrorMessage } from '@/lib/supabase/invokeError';
-import { formatDaysOfWeek, DAY_LABELS, todayIso } from '@/lib/format';
+import { formatDaysOfWeek, DAY_LABELS, todayIso, currentMonthIso, formatCurrency, formatDate } from '@/lib/format';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -12,7 +12,7 @@ import { TextField } from '@/components/TextField';
 import { Chip } from '@/components/Chip';
 import { PasswordRevealCard } from '@/components/PasswordRevealCard';
 import { colors, fonts, spacing } from '@/constants/theme';
-import type { Customer, Item, RecurringRule } from '@/lib/supabase/types';
+import type { Customer, Item, RecurringRule, Payment } from '@/lib/supabase/types';
 
 export default function CustomerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -20,22 +20,31 @@ export default function CustomerDetail() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [rules, setRules] = useState<RecurringRule[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRuleForm, setShowRuleForm] = useState(false);
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [resetPassword, setResetPassword] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [billLink, setBillLink] = useState<string | null>(null);
+  const [billLoading, setBillLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id || !shopId) return;
-    const [{ data: c }, { data: itemRows }, { data: ruleRows }] = await Promise.all([
+    const [{ data: c }, { data: itemRows }, { data: ruleRows }, { data: paymentRows }, { data: bal }] = await Promise.all([
       supabase.from('customers').select('*').eq('id', id).single(),
       supabase.from('items').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
       supabase.from('customer_recurring_rules').select('*').eq('customer_id', id),
+      supabase.from('payments').select('*').eq('customer_id', id).order('payment_date', { ascending: false }),
+      supabase.rpc('customer_running_balance', { p_customer_id: id }),
     ]);
     setCustomer(c ?? null);
     setItems(itemRows ?? []);
     setRules(ruleRows ?? []);
+    setPayments(paymentRows ?? []);
+    setBalance(bal !== null && bal !== undefined ? Number(bal) : null);
     setLoading(false);
   }, [id, shopId]);
 
@@ -71,6 +80,26 @@ export default function CustomerDetail() {
   async function handleToggleRuleActive(rule: RecurringRule) {
     await supabase.from('customer_recurring_rules').update({ is_active: !rule.is_active }).eq('id', rule.id);
     load();
+  }
+
+  async function handleGenerateBillLink() {
+    if (!customer) return;
+    setBillLoading(true);
+    setError(null);
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('generate-monthly-bill', {
+        body: { customer_id: customer.id, month: currentMonthIso() },
+      });
+      if (fnError || !data?.token) {
+        throw new Error(await functionErrorMessage(fnError, 'Could not generate bill link'));
+      }
+      const base = process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'http://localhost:8081';
+      setBillLink(`${base}/bill/${data.token}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate bill link');
+    } finally {
+      setBillLoading(false);
+    }
   }
 
   if (loading || !customer) {
@@ -114,6 +143,47 @@ export default function CustomerDetail() {
             <Button label="Reset Password" variant="ghost" onPress={handleRegeneratePassword} loading={resetting} style={{ flex: 1 }} />
           </View>
         </Card>
+
+        <Card style={{ gap: spacing.sm }}>
+          <Text style={styles.sectionTitle}>Balance Due</Text>
+          <Text style={styles.balance}>{balance !== null ? formatCurrency(balance) : '—'}</Text>
+          <Button label="Share This Month's Bill Link" variant="ghost" onPress={handleGenerateBillLink} loading={billLoading} />
+          {billLink ? <Text selectable style={styles.billLink}>{billLink}</Text> : null}
+        </Card>
+
+        <View style={styles.rulesHeader}>
+          <Text style={styles.sectionTitleLg}>Payments</Text>
+          <Button label={showPaymentForm ? 'Cancel' : '+ Record'} variant={showPaymentForm ? 'neutral' : 'primary'} onPress={() => setShowPaymentForm((v) => !v)} style={styles.smallButton} />
+        </View>
+
+        {showPaymentForm ? (
+          <PaymentForm
+            shopId={shopId!}
+            customerId={customer.id}
+            onDone={() => {
+              setShowPaymentForm(false);
+              load();
+            }}
+          />
+        ) : null}
+
+        {payments.length === 0 && !showPaymentForm ? (
+          <Card>
+            <Text style={styles.notes}>No payments recorded yet.</Text>
+          </Card>
+        ) : null}
+
+        {payments.map((p) => (
+          <Card key={p.id} style={styles.ruleCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.field}>{formatCurrency(p.amount)}</Text>
+              <Text style={styles.notes}>
+                {formatDate(p.payment_date)}
+                {p.note ? ` · ${p.note}` : ''}
+              </Text>
+            </View>
+          </Card>
+        ))}
 
         <View style={styles.rulesHeader}>
           <Text style={styles.sectionTitleLg}>Recurring Deliveries</Text>
@@ -251,6 +321,55 @@ function RuleForm({
   );
 }
 
+function PaymentForm({
+  shopId,
+  customerId,
+  onDone,
+}: {
+  shopId: string;
+  customerId: string;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setError(null);
+    const n = Number(amount);
+    if (!amount || Number.isNaN(n) || n <= 0) {
+      setError('Enter a valid amount.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: insertError } = await supabase.from('payments').insert({
+        shop_id: shopId,
+        customer_id: customerId,
+        amount: n,
+        payment_date: todayIso(),
+        note: note.trim() || null,
+      });
+      if (insertError) throw insertError;
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not record payment');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card style={{ gap: spacing.md }}>
+      <TextField label="Amount received" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="500" />
+      <TextField label="Note (optional)" value={note} onChangeText={setNote} placeholder="Cash / UPI" />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button label="Record Payment" onPress={handleSave} loading={saving} />
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, gap: spacing.md },
   sectionTitle: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.textMuted3 },
@@ -263,4 +382,6 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   ruleCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   smallButton: { minHeight: 34, paddingVertical: 6, paddingHorizontal: spacing.md },
+  balance: { fontFamily: fonts.headingBold, fontSize: 24, color: colors.primary },
+  billLink: { fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary },
 });

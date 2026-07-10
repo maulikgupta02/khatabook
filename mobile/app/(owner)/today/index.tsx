@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { formatCurrency, todayIso } from '@/lib/format';
+import { OFFLINE_SUPPORTED } from '@/lib/offline/db';
+import { enqueueMutation, countPendingMutations, type QueuedMutation, listPendingMutations } from '@/lib/offline/queue';
+import { syncPendingMutations } from '@/lib/offline/sync';
+import { saveTodayCache, loadTodayCache } from '@/lib/offline/todayCache';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Card } from '@/components/Card';
@@ -24,6 +30,14 @@ type Row = {
   isExtra: boolean;
 };
 
+type TodaySnapshot = {
+  customers: Customer[];
+  items: Item[];
+  itemPrices: Record<string, number>;
+  expected: ExpectedDelivery[];
+  extras: DeliveryRecord[];
+};
+
 const STATUS_LABEL: Record<DeliveryStatus, string> = {
   delivered: 'Delivered',
   changed: 'Changed',
@@ -31,40 +45,24 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = {
   extra: 'Extra',
 };
 
-const STATUS_VARIANT: Record<DeliveryStatus, 'success' | 'primary' | 'neutral'> = {
-  delivered: 'success',
-  changed: 'primary',
-  skipped: 'neutral',
-  extra: 'primary',
-};
-
 export default function OwnerToday() {
   const { shopId, loading: shopLoading } = useShop();
   const date = todayIso();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [itemPrices, setItemPrices] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [showExtraForm, setShowExtraForm] = useState(false);
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [usingCache, setUsingCache] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!shopId) return;
-    const [{ data: customerRows }, { data: itemRows }, { data: expected }, { data: extras }] = await Promise.all([
-      supabase.from('customers').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
-      supabase.from('items').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
-      supabase.rpc('expected_deliveries', { p_shop_id: shopId, p_date: date }),
-      supabase
-        .from('delivery_records')
-        .select('*')
-        .eq('shop_id', shopId)
-        .eq('delivery_date', date)
-        .eq('is_extra', true),
-    ]);
-
-    const expectedRows: Row[] = (expected ?? []).map((e: ExpectedDelivery) => ({
+  const rowsFromServer = useCallback((snapshot: TodaySnapshot): Row[] => {
+    const expectedRows: Row[] = snapshot.expected.map((e) => ({
       key: `${e.customer_id}-${e.item_id}`,
       customerId: e.customer_id,
       itemId: e.item_id,
@@ -75,7 +73,7 @@ export default function OwnerToday() {
       status: e.status,
       isExtra: false,
     }));
-    const extraRows: Row[] = (extras ?? []).map((r: DeliveryRecord) => ({
+    const extraRows: Row[] = snapshot.extras.map((r) => ({
       key: r.id,
       customerId: r.customer_id,
       itemId: r.item_id,
@@ -86,17 +84,142 @@ export default function OwnerToday() {
       status: r.status,
       isExtra: true,
     }));
+    return [...expectedRows, ...extraRows];
+  }, []);
 
-    setCustomers(customerRows ?? []);
-    setItems(itemRows ?? []);
-    setRows([...expectedRows, ...extraRows]);
+  // Reconciles fresh/cached server rows with anything still sitting in the local
+  // mutation queue -- without this, a mutation that hasn't synced yet (or a whole
+  // offline session's worth of them after an app restart) would visually vanish the
+  // next time this screen loads, even though it's still genuinely pending.
+  const mergePending = useCallback((baseRows: Row[], pending: QueuedMutation[]): Row[] => {
+    let next = baseRows;
+    for (const mutation of pending) {
+      const payload = JSON.parse(mutation.payload);
+      if (mutation.type === 'mark_delivery') {
+        if (payload.p_is_extra) {
+          const exists = next.some((r) => r.key === payload.p_client_mutation_id);
+          if (!exists) {
+            next = [
+              ...next,
+              {
+                key: payload.p_client_mutation_id,
+                customerId: payload.p_customer_id,
+                itemId: payload.p_item_id,
+                recordId: payload.p_client_mutation_id,
+                expectedQuantity: null,
+                actualQuantity: Number(payload.p_quantity),
+                unitPrice: Number(payload.p_unit_price),
+                status: payload.p_status,
+                isExtra: true,
+              },
+            ];
+          }
+        } else {
+          next = next.map((r) =>
+            !r.isExtra && r.customerId === payload.p_customer_id && r.itemId === payload.p_item_id
+              ? {
+                  ...r,
+                  recordId: r.recordId ?? payload.p_client_mutation_id,
+                  actualQuantity: Number(payload.p_quantity),
+                  status: payload.p_status,
+                }
+              : r
+          );
+        }
+      } else if (mutation.type === 'bulk_complete') {
+        next = next.map((r) =>
+          !r.isExtra && r.recordId === null
+            ? { ...r, recordId: `pending-bulk-${r.key}`, actualQuantity: r.expectedQuantity, status: 'delivered' as DeliveryStatus }
+            : r
+        );
+      }
+    }
+    return next;
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!shopId) return;
+    let snapshot: TodaySnapshot | null = null;
+    let fromCache = false;
+
+    try {
+      const [{ data: customerRows }, { data: itemRows }, { data: priceRows }, { data: expected, error: expectedError }, { data: extras }] =
+        await Promise.all([
+          supabase.from('customers').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
+          supabase.from('items').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
+          supabase.from('item_price_history').select('item_id, price').is('effective_to', null),
+          supabase.rpc('expected_deliveries', { p_shop_id: shopId, p_date: date }),
+          supabase.from('delivery_records').select('*').eq('shop_id', shopId).eq('delivery_date', date).eq('is_extra', true),
+        ]);
+      if (expectedError) throw expectedError;
+      snapshot = {
+        customers: customerRows ?? [],
+        items: itemRows ?? [],
+        itemPrices: Object.fromEntries((priceRows ?? []).map((p) => [p.item_id, Number(p.price)])),
+        expected: expected ?? [],
+        extras: extras ?? [],
+      };
+      if (OFFLINE_SUPPORTED) await saveTodayCache(shopId, date, snapshot);
+    } catch {
+      if (OFFLINE_SUPPORTED) {
+        snapshot = await loadTodayCache<TodaySnapshot>(shopId, date);
+        fromCache = !!snapshot;
+      }
+    }
+
+    if (!snapshot) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    let builtRows = rowsFromServer(snapshot);
+    let pendingCount = 0;
+    if (OFFLINE_SUPPORTED) {
+      const pending = await listPendingMutations();
+      pendingCount = pending.length;
+      builtRows = mergePending(builtRows, pending);
+    }
+
+    setCustomers(snapshot.customers);
+    setItems(snapshot.items);
+    setItemPrices(snapshot.itemPrices);
+    setRows(builtRows);
+    setUsingCache(fromCache);
+    setQueuedCount(pendingCount);
     setLoading(false);
     setRefreshing(false);
-  }, [shopId, date]);
+  }, [shopId, date, rowsFromServer, mergePending]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Sync on mount (covers pending mutations left over from a previous offline
+  // session) and whenever connectivity comes back.
+  const syncingRef = useRef(false);
+  const trySync = useCallback(async () => {
+    if (!OFFLINE_SUPPORTED || syncingRef.current) return;
+    syncingRef.current = true;
+    setSyncing(true);
+    try {
+      await syncPendingMutations();
+    } finally {
+      syncingRef.current = false;
+      setSyncing(false);
+      load();
+    }
+  }, [load]);
+
+  useEffect(() => {
+    if (!OFFLINE_SUPPORTED) return;
+    trySync();
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected) trySync();
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const customerMap = useMemo(() => Object.fromEntries(customers.map((c) => [c.id, c])), [customers]);
   const itemMap = useMemo(() => Object.fromEntries(items.map((i) => [i.id, i])), [items]);
@@ -112,59 +235,110 @@ export default function OwnerToday() {
       .sort((a, b) => customerMap[a[0]].name.localeCompare(customerMap[b[0]].name));
   }, [rows, customerMap]);
 
-  const pendingCount = rows.filter((r) => !r.isExtra && r.recordId === null).length;
+  const pendingDeliveryCount = rows.filter((r) => !r.isExtra && r.recordId === null).length;
   const doneCount = rows.filter((r) => r.recordId !== null).length;
 
-  async function upsertRow(row: Row, patch: { quantity: number; status: DeliveryStatus }) {
+  async function queueMarkDelivery(row: Row, patch: { quantity: number; status: DeliveryStatus }) {
     if (!shopId) return;
-    if (row.recordId) {
-      await supabase
-        .from('delivery_records')
-        .update({ quantity: patch.quantity, status: patch.status, unit_price: row.unitPrice })
-        .eq('id', row.recordId);
-    } else {
-      await supabase.from('delivery_records').insert({
-        shop_id: shopId,
-        customer_id: row.customerId,
-        item_id: row.itemId,
-        delivery_date: date,
-        quantity: patch.quantity,
-        unit_price: row.unitPrice,
-        status: patch.status,
-        is_extra: false,
-      });
-    }
+    const clientMutationId = Crypto.randomUUID();
+    const payload = {
+      p_client_mutation_id: clientMutationId,
+      p_shop_id: shopId,
+      p_customer_id: row.customerId,
+      p_item_id: row.itemId,
+      p_delivery_date: date,
+      p_quantity: patch.quantity,
+      p_unit_price: row.unitPrice,
+      p_status: patch.status,
+      p_is_extra: row.isExtra,
+    };
+
+    setRows((prev) =>
+      prev.map((r) =>
+        r.key === row.key ? { ...r, recordId: r.recordId ?? clientMutationId, actualQuantity: patch.quantity, status: patch.status } : r
+      )
+    );
     setEditingKey(null);
-    load();
+
+    if (OFFLINE_SUPPORTED) {
+      await enqueueMutation('mark_delivery', payload);
+      setQueuedCount(await countPendingMutations());
+      trySync();
+    } else {
+      await supabase.rpc('upsert_delivery', payload);
+      load();
+    }
   }
 
   async function handleDelivered(row: Row) {
-    await upsertRow(row, { quantity: row.expectedQuantity ?? 0, status: 'delivered' });
+    await queueMarkDelivery(row, { quantity: row.expectedQuantity ?? 0, status: 'delivered' });
   }
 
   async function handleSkipped(row: Row) {
-    await upsertRow(row, { quantity: 0, status: 'skipped' });
+    await queueMarkDelivery(row, { quantity: 0, status: 'skipped' });
+  }
+
+  async function handleAddExtra(customerId: string, itemId: string, quantity: number) {
+    if (!shopId) return;
+    const unitPrice = itemPrices[itemId] ?? 0;
+    const clientMutationId = Crypto.randomUUID();
+    const payload = {
+      p_client_mutation_id: clientMutationId,
+      p_shop_id: shopId,
+      p_customer_id: customerId,
+      p_item_id: itemId,
+      p_delivery_date: date,
+      p_quantity: quantity,
+      p_unit_price: unitPrice,
+      p_status: 'extra' as DeliveryStatus,
+      p_is_extra: true,
+    };
+
+    setRows((prev) => [
+      ...prev,
+      {
+        key: clientMutationId,
+        customerId,
+        itemId,
+        recordId: clientMutationId,
+        expectedQuantity: null,
+        actualQuantity: quantity,
+        unitPrice,
+        status: 'extra',
+        isExtra: true,
+      },
+    ]);
+    setShowExtraForm(false);
+
+    if (OFFLINE_SUPPORTED) {
+      await enqueueMutation('mark_delivery', payload);
+      setQueuedCount(await countPendingMutations());
+      trySync();
+    } else {
+      await supabase.rpc('upsert_delivery', payload);
+      load();
+    }
   }
 
   async function handleCompleteRemaining() {
     if (!shopId) return;
-    const pending = rows.filter((r) => !r.isExtra && r.recordId === null);
-    if (pending.length === 0) return;
+    if (pendingDeliveryCount === 0) return;
     setBulkSaving(true);
-    await supabase.from('delivery_records').insert(
-      pending.map((row) => ({
-        shop_id: shopId,
-        customer_id: row.customerId,
-        item_id: row.itemId,
-        delivery_date: date,
-        quantity: row.expectedQuantity ?? 0,
-        unit_price: row.unitPrice,
-        status: 'delivered' as DeliveryStatus,
-        is_extra: false,
-      }))
+
+    setRows((prev) =>
+      prev.map((r) => (!r.isExtra && r.recordId === null ? { ...r, recordId: `pending-bulk-${r.key}`, actualQuantity: r.expectedQuantity, status: 'delivered' } : r))
     );
+
+    const payload = { p_shop_id: shopId, p_date: date };
+    if (OFFLINE_SUPPORTED) {
+      await enqueueMutation('bulk_complete', payload);
+      setQueuedCount(await countPendingMutations());
+      await trySync();
+    } else {
+      await supabase.rpc('bulk_complete_remaining', payload);
+      await load();
+    }
     setBulkSaving(false);
-    load();
   }
 
   if (shopLoading || loading) {
@@ -180,33 +354,36 @@ export default function OwnerToday() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <ScreenHeader title="Today's Deliveries" subtitle={`${doneCount} of ${rows.length} done · ${pendingCount} pending`} />
+      <ScreenHeader
+        title="Today's Deliveries"
+        subtitle={`${doneCount} of ${rows.length} done · ${pendingDeliveryCount} pending${usingCache ? ' · offline (cached)' : ''}`}
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
+        {queuedCount > 0 ? (
+          <Card style={styles.syncBanner}>
+            <Text style={styles.syncText}>
+              {queuedCount} change{queuedCount === 1 ? '' : 's'} waiting to sync
+            </Text>
+            <Button label={syncing ? 'Syncing…' : 'Sync Now'} variant="ghost" onPress={trySync} loading={syncing} style={styles.smallButton} />
+          </Card>
+        ) : null}
+
         <View style={{ flexDirection: 'row', gap: spacing.sm }}>
           <Button
-            label={`Complete Remaining (${pendingCount})`}
+            label={`Complete Remaining (${pendingDeliveryCount})`}
             onPress={handleCompleteRemaining}
             loading={bulkSaving}
-            disabled={pendingCount === 0}
+            disabled={pendingDeliveryCount === 0}
             style={{ flex: 1 }}
           />
           <Button label={showExtraForm ? 'Cancel' : '+ Extra'} variant="neutral" onPress={() => setShowExtraForm((v) => !v)} style={{ flex: 1 }} />
         </View>
 
         {showExtraForm ? (
-          <ExtraItemForm
-            shopId={shopId!}
-            date={date}
-            customers={customers}
-            items={items}
-            onDone={() => {
-              setShowExtraForm(false);
-              load();
-            }}
-          />
+          <ExtraItemForm customers={customers} items={items} onSave={handleAddExtra} />
         ) : null}
 
         {rowsByCustomer.length === 0 ? (
@@ -223,7 +400,7 @@ export default function OwnerToday() {
                   row={row}
                   itemName={itemMap[row.itemId]?.name ?? 'Item'}
                   onCancel={() => setEditingKey(null)}
-                  onSave={(qty) => upsertRow(row, { quantity: qty, status: 'changed' })}
+                  onSave={(qty) => queueMarkDelivery(row, { quantity: qty, status: 'changed' })}
                 />
               ) : (
                 <View key={row.key} style={styles.row}>
@@ -300,25 +477,20 @@ function ChangedForm({
 }
 
 function ExtraItemForm({
-  shopId,
-  date,
   customers,
   items,
-  onDone,
+  onSave,
 }: {
-  shopId: string;
-  date: string;
   customers: Customer[];
   items: Item[];
-  onDone: () => void;
+  onSave: (customerId: string, itemId: string, quantity: number) => void;
 }) {
   const [customerId, setCustomerId] = useState<string | null>(customers[0]?.id ?? null);
   const [itemId, setItemId] = useState<string | null>(items[0]?.id ?? null);
   const [qty, setQty] = useState('1');
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSave() {
+  function handleSave() {
     setError(null);
     const n = Number(qty);
     if (!customerId || !itemId) {
@@ -329,30 +501,7 @@ function ExtraItemForm({
       setError('Enter a valid quantity.');
       return;
     }
-    setSaving(true);
-    try {
-      const { data: price, error: priceError } = await supabase.rpc('price_on_date', {
-        p_item_id: itemId,
-        p_date: date,
-      });
-      if (priceError) throw priceError;
-      const { error: insertError } = await supabase.from('delivery_records').insert({
-        shop_id: shopId,
-        customer_id: customerId,
-        item_id: itemId,
-        delivery_date: date,
-        quantity: n,
-        unit_price: price ?? 0,
-        status: 'extra',
-        is_extra: true,
-      });
-      if (insertError) throw insertError;
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not add extra item');
-    } finally {
-      setSaving(false);
-    }
+    onSave(customerId, itemId, n);
   }
 
   return (
@@ -375,7 +524,7 @@ function ExtraItemForm({
       </View>
       <TextField label="Quantity" value={qty} onChangeText={setQty} keyboardType="decimal-pad" />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button label="Add Extra Item" onPress={handleSave} loading={saving} />
+      <Button label="Add Extra Item" onPress={handleSave} />
     </Card>
   );
 }
@@ -399,4 +548,6 @@ const styles = StyleSheet.create({
   label: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.textMuted3 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   error: { color: colors.dangerText, fontFamily: fonts.bodyMedium, fontSize: 13 },
+  syncBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.warnBg, borderColor: colors.warnBorder },
+  syncText: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.warnText, flex: 1 },
 });

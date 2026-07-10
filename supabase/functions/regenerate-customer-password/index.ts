@@ -1,5 +1,6 @@
 import { corsHeaders } from '../_shared/cors.ts';
 import { adminClient, callerClient, randomPassword } from '../_shared/clients.ts';
+import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -16,7 +17,7 @@ Deno.serve(async (req) => {
 
     const { data: customer, error: customerError } = await caller
       .from('customers')
-      .select('id, auth_user_id, shop_id')
+      .select('id, auth_user_id, shop_id, mobile')
       .eq('id', customer_id)
       .single();
     if (customerError || !customer) throw new Error('Customer not found');
@@ -33,6 +34,15 @@ Deno.serve(async (req) => {
     const admin = adminClient();
     const { error: updateError } = await admin.auth.admin.updateUserById(customer.auth_user_id, { password });
     if (updateError) throw updateError;
+
+    const { data: shop } = await admin.from('shops').select('name').eq('id', customer.shop_id).single();
+    await sendWhatsApp(admin, {
+      shopId: customer.shop_id,
+      customerId: customer.id,
+      to: customer.mobile,
+      templateName: 'password_reset',
+      bodyParams: [shop?.name ?? 'your shop', password],
+    });
 
     return new Response(JSON.stringify({ password }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -6,3 +6,7 @@
 .env.keys
 .env.local
 .env.*.local
+
+# Edge Function secrets (WhatsApp credentials, etc.) -- see functions/.env.example
+functions/.env
+.env

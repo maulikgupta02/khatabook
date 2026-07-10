@@ -3,6 +3,7 @@
 // in plaintext and never shown again after this response.
 import { corsHeaders } from '../_shared/cors.ts';
 import { adminClient, callerClient, randomPassword } from '../_shared/clients.ts';
+import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -56,6 +57,15 @@ Deno.serve(async (req) => {
       await admin.auth.admin.deleteUser(authUser.user.id);
       throw new Error(insertError.message.includes('duplicate') ? 'This mobile number is already a customer' : insertError.message);
     }
+
+    const { data: shop } = await admin.from('shops').select('name').eq('id', shopId).single();
+    await sendWhatsApp(admin, {
+      shopId,
+      customerId: customer.id,
+      to: mobile,
+      templateName: 'customer_welcome',
+      bodyParams: [shop?.name ?? 'your shop', mobile, password],
+    });
 
     return new Response(JSON.stringify({ customer, password }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

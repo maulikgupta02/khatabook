@@ -14,6 +14,14 @@ import { PasswordRevealCard } from '@/components/PasswordRevealCard';
 import { colors, fonts, spacing } from '@/constants/theme';
 import type { Customer, Item, RecurringRule, Payment } from '@/lib/supabase/types';
 
+type WhatsAppLogRow = {
+  id: string;
+  template_name: string;
+  status: 'queued' | 'sent' | 'failed';
+  error: string | null;
+  created_at: string;
+};
+
 export default function CustomerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { shopId } = useShop();
@@ -21,6 +29,7 @@ export default function CustomerDetail() {
   const [items, setItems] = useState<Item[]>([]);
   const [rules, setRules] = useState<RecurringRule[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [messages, setMessages] = useState<WhatsAppLogRow[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRuleForm, setShowRuleForm] = useState(false);
@@ -33,18 +42,26 @@ export default function CustomerDetail() {
 
   const load = useCallback(async () => {
     if (!id || !shopId) return;
-    const [{ data: c }, { data: itemRows }, { data: ruleRows }, { data: paymentRows }, { data: bal }] = await Promise.all([
-      supabase.from('customers').select('*').eq('id', id).single(),
-      supabase.from('items').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
-      supabase.from('customer_recurring_rules').select('*').eq('customer_id', id),
-      supabase.from('payments').select('*').eq('customer_id', id).order('payment_date', { ascending: false }),
-      supabase.rpc('customer_running_balance', { p_customer_id: id }),
-    ]);
+    const [{ data: c }, { data: itemRows }, { data: ruleRows }, { data: paymentRows }, { data: bal }, { data: messageRows }] =
+      await Promise.all([
+        supabase.from('customers').select('*').eq('id', id).single(),
+        supabase.from('items').select('*').eq('shop_id', shopId).eq('is_active', true).order('name'),
+        supabase.from('customer_recurring_rules').select('*').eq('customer_id', id),
+        supabase.from('payments').select('*').eq('customer_id', id).order('payment_date', { ascending: false }),
+        supabase.rpc('customer_running_balance', { p_customer_id: id }),
+        supabase
+          .from('whatsapp_log')
+          .select('id, template_name, status, error, created_at')
+          .eq('customer_id', id)
+          .order('created_at', { ascending: false })
+          .limit(10),
+      ]);
     setCustomer(c ?? null);
     setItems(itemRows ?? []);
     setRules(ruleRows ?? []);
     setPayments(paymentRows ?? []);
     setBalance(bal !== null && bal !== undefined ? Number(bal) : null);
+    setMessages(messageRows ?? []);
     setLoading(false);
   }, [id, shopId]);
 
@@ -184,6 +201,28 @@ export default function CustomerDetail() {
             </View>
           </Card>
         ))}
+
+        <Text style={styles.sectionTitleLg}>WhatsApp Messages</Text>
+        {messages.length === 0 ? (
+          <Card>
+            <Text style={styles.notes}>No messages sent yet.</Text>
+          </Card>
+        ) : (
+          messages.map((m) => (
+            <Card key={m.id} style={styles.ruleCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.field}>{m.template_name.replace(/_/g, ' ')}</Text>
+                <Text style={styles.notes}>
+                  {formatDate(m.created_at.slice(0, 10))}
+                  {m.status === 'failed' && m.error ? ` · ${m.error}` : ''}
+                </Text>
+              </View>
+              <View style={[styles.msgBadge, msgBadgeStyleFor(m.status)]}>
+                <Text style={styles.msgBadgeText}>{m.status}</Text>
+              </View>
+            </Card>
+          ))
+        )}
 
         <View style={styles.rulesHeader}>
           <Text style={styles.sectionTitleLg}>Recurring Deliveries</Text>
@@ -370,6 +409,12 @@ function PaymentForm({
   );
 }
 
+function msgBadgeStyleFor(status: WhatsAppLogRow['status']) {
+  if (status === 'sent') return { backgroundColor: colors.success, borderColor: colors.success };
+  if (status === 'failed') return { backgroundColor: colors.dangerBgSoft, borderColor: colors.dangerBorder };
+  return { backgroundColor: colors.neutralBg, borderColor: colors.neutralBorder };
+}
+
 const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, gap: spacing.md },
   sectionTitle: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.textMuted3 },
@@ -384,4 +429,6 @@ const styles = StyleSheet.create({
   smallButton: { minHeight: 34, paddingVertical: 6, paddingHorizontal: spacing.md },
   balance: { fontFamily: fonts.headingBold, fontSize: 24, color: colors.primary },
   billLink: { fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary },
+  msgBadge: { borderRadius: 999, borderWidth: 1, paddingVertical: 4, paddingHorizontal: spacing.sm },
+  msgBadgeText: { fontFamily: fonts.bodySemiBold, fontSize: 11, color: colors.textMuted2, textTransform: 'capitalize' },
 });

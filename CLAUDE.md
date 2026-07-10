@@ -11,18 +11,22 @@ Multi-tenant SaaS for milk/kirana/tiffin/newspaper vendors to track daily delive
 
 ## Structure
 
-- `mobile/app/` — Expo Router routes: `(auth)` login, `(owner)` shop-owner tabs, `(customer)` customer tabs, `(public)/bill/[token]` public no-auth bill link.
-- `mobile/lib/supabase/` — Supabase client + session hook.
-- `mobile/lib/offline/` — offline-first SQLite cache + mutation queue (Phase 5).
+- `mobile/app/` — Expo Router routes: `(auth)` login/signup, `(owner)` shop-owner tabs (today/customers/items/reports), `(customer)` customer tabs (home/bills), `(public)/bill/[token]` public no-auth bill link.
+- `mobile/lib/supabase/` — client, session/shop/customer hooks, shared row types, Edge Function error-message helper.
+- `mobile/lib/offline/` — offline-first SQLite cache + mutation queue (Phase 5, not yet built).
 - `mobile/constants/theme.ts` — design tokens (colors/fonts) converted from the `.dc.html` prototype's oklch palette to hex for React Native compatibility.
-- `supabase/migrations/` — schema (`0001_init.sql`) + RLS policies (`0002_rls.sql`).
-- `supabase/functions/` — Edge Functions (added from Phase 1 onward).
+- `supabase/migrations/` — schema, RLS, and RPCs, numbered in application order (`0001`–`0006` so far: init, RLS, owner-side pricing RPC, service_role grants, delivery RPC grants, billing/running-balance RPC).
+- `supabase/functions/` — Edge Functions: `create-customer`, `resolve-customer-login`, `regenerate-customer-password`, `generate-monthly-bill`, `resolve-bill-token`, plus `_shared/` (CORS, Supabase client factories, WhatsApp sender).
 
 ## Key design decisions
 
 - Customer login is mobile+password (not Supabase's native email/phone+OTP). Solved via a synthetic internal email `cust-{shop_id}-{mobile}@internal.khatabook.app` created server-side only; never shown to the customer.
-- "Expected delivery for today" is computed on read from `customer_recurring_rules` + `delivery_records` (see `expected_deliveries()` SQL function) — never pre-materialized.
+- "Expected delivery for today" is computed on read from `customer_recurring_rules` + `delivery_records` (see `expected_deliveries()` SQL function) — never pre-materialized. This function is `security invoker` (default), so RLS naturally scopes it: an owner calling it sees their whole shop, a customer calling it only ever sees their own row.
 - `delivery_records` is the single source of truth for both today's status and monthly billing; `unit_price` is snapshotted at write time so historical bills stay correct after price changes.
-- Public bill links (`bill_tokens`) have no RLS SELECT policy for anyone — access only via the `resolve-bill-token` Edge Function (service role), which is what actually prevents enumeration.
+- A customer's running balance (`customer_running_balance` RPC) is a lifetime khata balance (all-time delivered value minus all-time payments), not a per-month reset — matches the "permanent daily ledger" requirement. Monthly bills/tokens are a separate concept: a frozen snapshot + shareable link for a specific month.
+- Public bill links (`bill_tokens`) have no RLS SELECT policy for anyone — access only via the `resolve-bill-token` Edge Function (service role), which is what actually prevents enumeration. Every failure path (bad token, expired token) returns the same generic message/404.
+- **service_role needs explicit table GRANTs even though it bypasses RLS** — BYPASSRLS only skips policy checks, not base Postgres privileges. Hosted Supabase provisions this automatically; a from-scratch local schema needs `0004_service_role_grants.sql` or Edge Functions using the admin client get `permission denied`.
+- **Local Supabase issues two key formats**: legacy JWT `ANON_KEY`/`SERVICE_ROLE_KEY` and newer non-JWT `sb_publishable_...`/`sb_secret_...` keys. `mobile/.env` uses the publishable key (what `supabase-js` expects). Edge Functions that must be callable *before* a user has a session (`resolve-customer-login`, `resolve-bill-token`) need `verify_jwt = false` in `supabase/config.toml`, because the publishable key isn't a JWT the functions relay can verify — only a real signed-in user's session JWT passes that check.
+- WhatsApp sends go through `_shared/whatsapp.ts` (`sendWhatsApp`), called from `create-customer` (welcome), `regenerate-customer-password` (password reset), and `generate-monthly-bill` (bill ready). Every call writes to `whatsapp_log` regardless of outcome. Without `WHATSAPP_ACCESS_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID` set (see `supabase/functions/.env.example`), it logs the exact Meta Cloud API payload as `status: 'queued'` instead of calling the network — verified end-to-end including a real-but-invalid-credentials call that Meta's API correctly rejected with a parseable error, proving the request shape is right.
 
 Current phase status is tracked in the session's task list, not here.

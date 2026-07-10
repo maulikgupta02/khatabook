@@ -3,6 +3,7 @@
 // service-role path can create one, so the token space stays fully server-controlled.
 import { corsHeaders } from '../_shared/cors.ts';
 import { adminClient, callerClient, randomToken } from '../_shared/clients.ts';
+import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -20,7 +21,7 @@ Deno.serve(async (req) => {
 
     const { data: customer, error: customerError } = await caller
       .from('customers')
-      .select('id, shop_id')
+      .select('id, shop_id, mobile')
       .eq('id', customer_id)
       .single();
     if (customerError || !customer) throw new Error('Customer not found');
@@ -82,6 +83,16 @@ Deno.serve(async (req) => {
         { onConflict: 'customer_id,month' }
       );
     if (billError) throw billError;
+
+    const { data: shop } = await admin.from('shops').select('name').eq('id', customer.shop_id).single();
+    const webBaseUrl = Deno.env.get('PUBLIC_WEB_BASE_URL') ?? 'http://localhost:8081';
+    await sendWhatsApp(admin, {
+      shopId: customer.shop_id,
+      customerId: customer.id,
+      to: customer.mobile,
+      templateName: 'bill_ready',
+      bodyParams: [shop?.name ?? 'your shop', month, totalAmount.toFixed(2), `${webBaseUrl}/bill/${token}`],
+    });
 
     return new Response(JSON.stringify({ token, total_amount: totalAmount }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -16,6 +16,10 @@ export default function OwnerLayout() {
       <Tabs.Screen name="customers/index" options={{ title: 'Customers' }} />
       <Tabs.Screen name="items/index" options={{ title: 'Items' }} />
       <Tabs.Screen name="reports/index" options={{ title: 'Reports' }} />
+      {/* Pushed detail screens under customers/ -- not their own tabs, but Expo Router
+          auto-registers every route in this group unless explicitly excluded here. */}
+      <Tabs.Screen name="customers/new" options={{ href: null }} />
+      <Tabs.Screen name="customers/[id]" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -14,6 +14,7 @@ export default function CustomerLayout() {
     >
       <Tabs.Screen name="home" options={{ title: 'Today' }} />
       <Tabs.Screen name="bills/index" options={{ title: 'My Bill' }} />
+      <Tabs.Screen name="bills/[month]" options={{ href: null }} />
     </Tabs>
   );
 }

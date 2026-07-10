@@ -85,9 +85,6 @@ export default function Login() {
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button label="Log In" onPress={handleLogin} loading={loading} style={{ marginTop: spacing.sm }} />
-          {role === 'owner' ? (
-            <Button label="New shop? Create account" variant="ghost" onPress={() => router.push('/(auth)/signup')} />
-          ) : null}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

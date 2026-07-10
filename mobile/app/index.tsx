@@ -1,12 +1,48 @@
+import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { useSession } from '@/lib/supabase/useSession';
+import { supabase } from '@/lib/supabase/client';
 import { colors } from '@/constants/theme';
 
-export default function Index() {
-  const { session, loading } = useSession();
+type Role = 'owner' | 'customer' | 'none';
 
-  if (loading) {
+export default function Index() {
+  const { session, loading: sessionLoading } = useSession();
+  const [role, setRole] = useState<Role | null>(null);
+
+  useEffect(() => {
+    if (sessionLoading) return;
+    if (!session) {
+      setRole('none');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data: ownerProfile } = await supabase
+        .from('shop_owner_profiles')
+        .select('user_id')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (ownerProfile) {
+        setRole('owner');
+        return;
+      }
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('auth_user_id', session.user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setRole(customer ? 'customer' : 'none');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id, sessionLoading]);
+
+  if (sessionLoading || role === null) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgPage }}>
         <ActivityIndicator color={colors.primary} />
@@ -14,9 +50,7 @@ export default function Index() {
     );
   }
 
-  if (!session) return <Redirect href="/(auth)/login" />;
-
-  // Role-based redirect (owner vs customer) lands here once shop_owner_profiles /
-  // customers lookup is wired up in Phase 1.
+  if (role === 'owner') return <Redirect href="/(owner)/today" />;
+  if (role === 'customer') return <Redirect href="/(customer)/home" />;
   return <Redirect href="/(auth)/login" />;
 }

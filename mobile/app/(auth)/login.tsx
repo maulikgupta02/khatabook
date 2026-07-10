@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
+import { functionErrorMessage } from '@/lib/supabase/invokeError';
 import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
@@ -27,9 +28,18 @@ export default function Login() {
         if (signInError) throw signInError;
         router.replace('/(owner)/today');
       } else {
-        // Customer login resolves mobile -> synthetic auth email server-side.
-        // Wired up in Phase 1 once the resolve-customer-login Edge Function exists.
-        setError('Customer login will be enabled once the backend is connected (Phase 1).');
+        const { data, error: fnError } = await supabase.functions.invoke('resolve-customer-login', {
+          body: { mobile: identifier.trim(), password },
+        });
+        if (fnError || !data?.access_token) {
+          throw new Error(await functionErrorMessage(fnError, 'Invalid mobile number or password'));
+        }
+        const { error: setSessionError } = await supabase.auth.setSession({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+        if (setSessionError) throw setSessionError;
+        router.replace('/(customer)/home');
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
@@ -75,6 +85,9 @@ export default function Login() {
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Button label="Log In" onPress={handleLogin} loading={loading} style={{ marginTop: spacing.sm }} />
+          {role === 'owner' ? (
+            <Button label="New shop? Create account" variant="ghost" onPress={() => router.push('/(auth)/signup')} />
+          ) : null}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

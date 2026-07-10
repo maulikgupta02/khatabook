@@ -354,6 +354,12 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# resolve-customer-login is called by customers who are not signed in yet (that's the
+# point of the endpoint), so it can't require a verified user JWT like the others --
+# it does its own mobile+password validation internally instead.
+[functions.resolve-customer-login]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

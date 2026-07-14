@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -30,9 +30,14 @@ export default function OwnerCustomers() {
     setRefreshing(false);
   }, [shopId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Tab screens stay mounted across navigation (Expo Router's Tabs doesn't unmount on
+  // blur), so a plain mount-only effect would never see a customer added via the
+  // customers/new screen. Refetch every time this tab regains focus instead.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -45,7 +50,7 @@ export default function OwnerCustomers() {
       <ScreenHeader
         title="Customers"
         subtitle={`${customers.length} customer${customers.length === 1 ? '' : 's'}`}
-        onSettingsPress={() => router.push('/(owner)/settings/index')}
+        onSettingsPress={() => router.push('/(owner)/settings')}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}

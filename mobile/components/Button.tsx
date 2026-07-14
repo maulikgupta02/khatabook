@@ -34,7 +34,13 @@ export function Button({ label, variant = 'primary', loading, disabled, style, .
       ]}
       {...rest}
     >
-      {loading ? <ActivityIndicator color={v.fg} /> : <Text style={[styles.label, { color: v.fg }]}>{label}</Text>}
+      {loading ? (
+        <ActivityIndicator color={v.fg} />
+      ) : (
+        <Text style={[styles.label, { color: v.fg }]} numberOfLines={1} adjustsFontSizeToFit>
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }

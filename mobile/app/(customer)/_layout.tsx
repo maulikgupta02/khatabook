@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import type { ColorValue } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts } from '@/constants/theme';
 
@@ -10,13 +11,24 @@ function tabIcon(focusedName: keyof typeof Ionicons.glyphMap, unfocusedName: key
 }
 
 export default function CustomerLayout() {
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: { borderTopColor: colors.borderCard, backgroundColor: colors.white },
+        // insets.bottom accounts for the phone's own gesture/nav bar (native) or the
+        // browser chrome's safe-area-inset-bottom (mweb, once +html.tsx sets
+        // viewport-fit=cover) -- without it the last row of icons/labels sits underneath
+        // that bar instead of above it.
+        tabBarStyle: {
+          borderTopColor: colors.borderCard,
+          backgroundColor: colors.white,
+          height: 56 + insets.bottom,
+          paddingBottom: insets.bottom + 6,
+          paddingTop: 6,
+        },
         tabBarLabelStyle: { fontFamily: fonts.bodySemiBold, fontSize: 12 },
       }}
     >

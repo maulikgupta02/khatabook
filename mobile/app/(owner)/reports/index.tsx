@@ -211,7 +211,7 @@ export default function OwnerReports() {
   if (shopLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Reports" onSettingsPress={() => router.push('/(owner)/settings/index')} />
+        <ScreenHeader title="Reports" onSettingsPress={() => router.push('/(owner)/settings')} />
         <View style={{ padding: spacing.xl }}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -221,7 +221,7 @@ export default function OwnerReports() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <ScreenHeader title="Reports" onSettingsPress={() => router.push('/(owner)/settings/index')} />
+      <ScreenHeader title="Reports" onSettingsPress={() => router.push('/(owner)/settings')} />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}

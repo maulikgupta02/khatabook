@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { functionErrorMessage } from '@/lib/supabase/invokeError';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -18,6 +18,20 @@ export default function NewCustomer() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ name: string; password: string } | null>(null);
+
+  // This tab screen stays mounted across navigation (Expo Router's Tabs doesn't unmount
+  // on blur), so without this, reopening "Add Customer" after finishing one would still
+  // show the previous customer's PasswordRevealCard instead of a blank form.
+  useFocusEffect(
+    useCallback(() => {
+      setName('');
+      setMobile('');
+      setAddress('');
+      setNotes('');
+      setError(null);
+      setCreated(null);
+    }, [])
+  );
 
   async function handleSave() {
     setError(null);

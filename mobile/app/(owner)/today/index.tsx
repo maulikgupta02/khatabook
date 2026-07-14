@@ -352,7 +352,7 @@ export default function OwnerToday() {
   if (shopLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Today's Deliveries" onSettingsPress={() => router.push('/(owner)/settings/index')} />
+        <ScreenHeader title="Today's Deliveries" onSettingsPress={() => router.push('/(owner)/settings')} />
         <View style={{ padding: spacing.xl }}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -365,7 +365,7 @@ export default function OwnerToday() {
       <ScreenHeader
         title="Today's Deliveries"
         subtitle={`${doneCount} of ${rows.length} done · ${pendingDeliveryCount} pending${usingCache ? ' · offline (cached)' : ''}`}
-        onSettingsPress={() => router.push('/(owner)/settings/index')}
+        onSettingsPress={() => router.push('/(owner)/settings')}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -382,7 +382,7 @@ export default function OwnerToday() {
 
         <View style={{ flexDirection: 'row', gap: spacing.sm }}>
           <Button
-            label={`Complete Remaining (${pendingDeliveryCount})`}
+            label={`Complete (${pendingDeliveryCount})`}
             onPress={handleCompleteRemaining}
             loading={bulkSaving}
             disabled={pendingDeliveryCount === 0}

@@ -56,7 +56,7 @@ export default function OwnerItems() {
   if (shopLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Items & Pricing" onSettingsPress={() => router.push('/(owner)/settings/index')} />
+        <ScreenHeader title="Items & Pricing" onSettingsPress={() => router.push('/(owner)/settings')} />
       </View>
     );
   }
@@ -66,7 +66,7 @@ export default function OwnerItems() {
       <ScreenHeader
         title="Items & Pricing"
         subtitle={`${items.length} item${items.length === 1 ? '' : 's'}`}
-        onSettingsPress={() => router.push('/(owner)/settings/index')}
+        onSettingsPress={() => router.push('/(owner)/settings')}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}

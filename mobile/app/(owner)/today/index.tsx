@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, 
 import { router } from 'expo-router';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { formatCurrency, todayIso } from '@/lib/format';
@@ -16,6 +17,7 @@ import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { Chip } from '@/components/Chip';
+import { ConfirmModal } from '@/components/ConfirmModal';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
 import type { Customer, Item, DeliveryStatus, ExpectedDelivery, DeliveryRecord } from '@/lib/supabase/types';
 
@@ -62,6 +64,8 @@ export default function OwnerToday() {
   const [queuedCount, setQueuedCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const rowsFromServer = useCallback((snapshot: TodaySnapshot): Row[] => {
     const expectedRows: Row[] = snapshot.expected.map((e) => ({
@@ -342,6 +346,25 @@ export default function OwnerToday() {
     load();
   }
 
+  // Same reasoning as handleEditExtra above: a plain delete-by-id, not offline-queued.
+  // For a regular row this undoes the mark entirely -- the row falls back to "pending"
+  // since expected_deliveries() computes off the *absence* of a delivery_records row,
+  // not a separate deleted flag. For an extra it just removes it from the list.
+  async function handleDeleteRow(row: Row) {
+    if (!row.recordId) return;
+    const recordId = row.recordId;
+    setDeleting(true);
+    if (row.isExtra) {
+      setRows((prev) => prev.filter((r) => r.key !== row.key));
+    } else {
+      setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, recordId: null, actualQuantity: null, status: null } : r)));
+    }
+    await supabase.from('delivery_records').delete().eq('id', recordId);
+    setDeleting(false);
+    setDeleteTarget(null);
+    load();
+  }
+
   async function handleCompleteRemaining() {
     if (!shopId) return;
     if (pendingDeliveryCount === 0) return;
@@ -467,12 +490,31 @@ export default function OwnerToday() {
                   ) : (
                     <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
                   )}
+                  {row.recordId !== null ? (
+                    <Pressable onPress={() => setDeleteTarget(row)} style={styles.iconButton} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={18} color={colors.dangerText} />
+                    </Pressable>
+                  ) : null}
                 </View>
               )
             )}
           </Card>
         ))}
       </ScrollView>
+
+      <ConfirmModal
+        visible={deleteTarget !== null}
+        title="Delete this entry?"
+        message={
+          deleteTarget?.isExtra
+            ? 'This extra item will be removed entirely. This can\'t be undone.'
+            : "This delivery will go back to pending -- today's status for it will be cleared. This can't be undone."
+        }
+        confirmLabel="Delete"
+        loading={deleting}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && handleDeleteRow(deleteTarget)}
+      />
     </View>
   );
 }
@@ -582,6 +624,7 @@ const styles = StyleSheet.create({
   qtyLine: { fontFamily: fonts.body, fontSize: 12.5, color: colors.textSecondary, marginTop: 2 },
   actionRow: { flexDirection: 'row', gap: spacing.xs },
   smallButton: { minHeight: 34, paddingVertical: 6, paddingHorizontal: spacing.sm },
+  iconButton: { minHeight: 34, minWidth: 34, alignItems: 'center', justifyContent: 'center' },
   badge: { borderRadius: radii.pill, borderWidth: 1, paddingVertical: 4, paddingHorizontal: spacing.sm },
   badgeText: { fontFamily: fonts.bodySemiBold, fontSize: 11, color: colors.white },
   label: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.textMuted3 },

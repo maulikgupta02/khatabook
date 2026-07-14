@@ -73,6 +73,18 @@ export type DeliveryRecord = {
   synced_at: string | null;
 };
 
+export type DeliveryFlag = {
+  id: string;
+  delivery_record_id: string;
+  customer_id: string;
+  raised_by: string;
+  reason_text: string;
+  status: FlagStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resolution_note: string | null;
+};
+
 export type Payment = {
   id: string;
   shop_id: string;

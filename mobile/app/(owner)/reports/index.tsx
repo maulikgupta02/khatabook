@@ -17,8 +17,15 @@ type FlagRow = {
   id: string;
   reason_text: string;
   created_at: string;
+  delivery_record_id: string;
   customers: { name: string } | null;
-  delivery_records: { delivery_date: string; items: { name: string } | null } | null;
+  delivery_records: {
+    delivery_date: string;
+    quantity: number;
+    unit_price: number;
+    is_extra: boolean;
+    items: { name: string; unit: string } | null;
+  } | null;
 };
 
 type ExportRecord = {
@@ -66,7 +73,9 @@ export default function OwnerReports() {
       supabase.from('customers').select('*').eq('shop_id', shopId).eq('is_active', true),
       supabase
         .from('delivery_flags')
-        .select('id, reason_text, created_at, customers(name), delivery_records(delivery_date, items(name))')
+        .select(
+          'id, reason_text, created_at, delivery_record_id, customers(name), delivery_records(delivery_date, quantity, unit_price, is_extra, items(name, unit))'
+        )
         .eq('status', 'open')
         .order('created_at', { ascending: false }),
       supabase.from('delivery_records').select('delivery_date').eq('shop_id', shopId).order('delivery_date', { ascending: false }),
@@ -113,10 +122,25 @@ export default function OwnerReports() {
     loadMonthSales(selectedMonth);
   }, [loadMonthSales, selectedMonth]);
 
-  async function handleResolve(flagId: string, note: string) {
+  async function handleSaveCorrection(flag: FlagRow, quantity: number, note: string) {
+    if (flag.delivery_records) {
+      await supabase
+        .from('delivery_records')
+        .update({ quantity, status: flag.delivery_records.is_extra ? 'extra' : 'changed' })
+        .eq('id', flag.delivery_record_id);
+    }
     await supabase
       .from('delivery_flags')
       .update({ status: 'resolved', resolution_note: note.trim() || null, resolved_at: new Date().toISOString() })
+      .eq('id', flag.id);
+    setResolvingId(null);
+    load();
+  }
+
+  async function handleDismiss(flagId: string, note: string) {
+    await supabase
+      .from('delivery_flags')
+      .update({ status: 'dismissed', resolution_note: note.trim() || null, resolved_at: new Date().toISOString() })
       .eq('id', flagId);
     setResolvingId(null);
     load();
@@ -274,7 +298,13 @@ export default function OwnerReports() {
         ) : (
           flags.map((flag) =>
             resolvingId === flag.id ? (
-              <ResolveForm key={flag.id} onCancel={() => setResolvingId(null)} onSubmit={(note) => handleResolve(flag.id, note)} />
+              <ResolveForm
+                key={flag.id}
+                flag={flag}
+                onCancel={() => setResolvingId(null)}
+                onDismiss={(note) => handleDismiss(flag.id, note)}
+                onSaveCorrection={(quantity, note) => handleSaveCorrection(flag, quantity, note)}
+              />
             ) : (
               <Card key={flag.id} style={{ gap: spacing.xs }}>
                 <Text style={styles.field}>{flag.customers?.name ?? 'Customer'}</Text>
@@ -282,7 +312,7 @@ export default function OwnerReports() {
                   {flag.delivery_records?.items?.name ?? 'Item'} · {flag.delivery_records ? formatDate(flag.delivery_records.delivery_date) : ''}
                 </Text>
                 <Text style={styles.reason}>"{flag.reason_text}"</Text>
-                <Button label="Resolve" variant="ghost" onPress={() => setResolvingId(flag.id)} style={styles.smallButton} />
+                <Button label="Respond" variant="ghost" onPress={() => setResolvingId(flag.id)} style={styles.smallButton} />
               </Card>
             )
           )
@@ -330,14 +360,44 @@ export default function OwnerReports() {
   );
 }
 
-function ResolveForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (note: string) => void }) {
+function ResolveForm({
+  flag,
+  onCancel,
+  onDismiss,
+  onSaveCorrection,
+}: {
+  flag: FlagRow;
+  onCancel: () => void;
+  onDismiss: (note: string) => void;
+  onSaveCorrection: (quantity: number, note: string) => void;
+}) {
+  const [quantity, setQuantity] = useState(String(flag.delivery_records?.quantity ?? ''));
   const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  function handleSaveCorrection() {
+    const n = Number(quantity);
+    if (!quantity || Number.isNaN(n) || n < 0) {
+      setError('Enter a valid quantity (0 counts as not delivered).');
+      return;
+    }
+    onSaveCorrection(n, note);
+  }
+
   return (
     <Card style={{ gap: spacing.sm }}>
-      <TextField label="Resolution note (optional)" value={note} onChangeText={setNote} placeholder="e.g. corrected on next visit" />
+      <TextField
+        label={`Corrected quantity${flag.delivery_records?.items?.unit ? ` (${flag.delivery_records.items.unit})` : ''}`}
+        value={quantity}
+        onChangeText={setQuantity}
+        keyboardType="decimal-pad"
+      />
+      <TextField label="Resolution note (optional)" value={note} onChangeText={setNote} placeholder="e.g. corrected, sorry!" />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         <Button label="Cancel" variant="neutral" onPress={onCancel} style={{ flex: 1 }} />
-        <Button label="Mark Resolved" onPress={() => onSubmit(note)} style={{ flex: 1 }} />
+        <Button label="Dismiss" variant="danger" onPress={() => onDismiss(note)} style={{ flex: 1 }} />
+        <Button label="Save Correction" onPress={handleSaveCorrection} style={{ flex: 1 }} />
       </View>
     </Card>
   );

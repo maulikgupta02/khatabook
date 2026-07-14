@@ -10,7 +10,7 @@ import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { colors, fonts, spacing } from '@/constants/theme';
-import type { DeliveryRecord, Item, Payment } from '@/lib/supabase/types';
+import type { DeliveryFlag, DeliveryRecord, Item, Payment } from '@/lib/supabase/types';
 
 export default function CustomerBillMonth() {
   const { month } = useLocalSearchParams<{ month: string }>();
@@ -18,6 +18,7 @@ export default function CustomerBillMonth() {
   const [records, setRecords] = useState<DeliveryRecord[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [flags, setFlags] = useState<DeliveryFlag[]>([]);
   const [loading, setLoading] = useState(true);
   const [flaggingId, setFlaggingId] = useState<string | null>(null);
 
@@ -27,7 +28,7 @@ export default function CustomerBillMonth() {
     const start = new Date(`${monthStart}T00:00:00Z`);
     const monthEnd = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
 
-    const [{ data: recordRows }, { data: itemRows }, { data: paymentRows }] = await Promise.all([
+    const [{ data: recordRows }, { data: itemRows }, { data: paymentRows }, { data: flagRows }] = await Promise.all([
       supabase
         .from('delivery_records')
         .select('*')
@@ -42,10 +43,12 @@ export default function CustomerBillMonth() {
         .eq('customer_id', customer.id)
         .gte('payment_date', monthStart)
         .lt('payment_date', monthEnd),
+      supabase.from('delivery_flags').select('*').eq('customer_id', customer.id).order('created_at', { ascending: false }),
     ]);
     setRecords(recordRows ?? []);
     setItems(itemRows ?? []);
     setPayments(paymentRows ?? []);
+    setFlags(flagRows ?? []);
     setLoading(false);
   }, [customer, month]);
 
@@ -54,6 +57,10 @@ export default function CustomerBillMonth() {
   }, [load]);
 
   const itemMap = Object.fromEntries(items.map((i) => [i.id, i]));
+  // flags is ordered newest-first, so the first entry per record wins here -- the most
+  // recent flag is the one whose status/note is worth showing if a record was ever re-flagged.
+  const flagByRecord: Record<string, DeliveryFlag> = {};
+  for (const f of flags) if (!flagByRecord[f.delivery_record_id]) flagByRecord[f.delivery_record_id] = f;
   const totalDelivered = records
     .filter((r) => r.status !== 'skipped')
     .reduce((sum, r) => sum + Number(r.quantity) * Number(r.unit_price), 0);
@@ -88,26 +95,43 @@ export default function CustomerBillMonth() {
         {records.length === 0 ? (
           <ComingSoon note="No deliveries recorded for this month." />
         ) : (
-          records.map((r) =>
-            flaggingId === r.id ? (
+          records.map((r) => {
+            const flag = flagByRecord[r.id];
+            return flaggingId === r.id ? (
               <FlagForm key={r.id} onCancel={() => setFlaggingId(null)} onSubmit={(reason) => handleFlag(r.id, reason)} />
             ) : (
-              <Card key={r.id} style={styles.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.date}>{formatDate(r.delivery_date)}</Text>
-                  <Text style={styles.itemLine}>
-                    {itemMap[r.item_id]?.name ?? 'Item'} · {r.quantity} {itemMap[r.item_id]?.unit}
-                    {r.is_extra ? ' (extra)' : ''}
-                    {r.status === 'skipped' ? ' — not delivered' : ''}
+              <Card key={r.id} style={{ gap: spacing.xs }}>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.date}>{formatDate(r.delivery_date)}</Text>
+                    <Text style={styles.itemLine}>
+                      {itemMap[r.item_id]?.name ?? 'Item'} · {r.quantity} {itemMap[r.item_id]?.unit}
+                      {r.is_extra ? ' (extra)' : ''}
+                      {r.status === 'skipped' ? ' — not delivered' : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.amount}>
+                    {r.status === 'skipped' ? '—' : formatCurrency(Number(r.quantity) * Number(r.unit_price))}
                   </Text>
+                  {!flag || flag.status !== 'open' ? (
+                    <Button label="Flag" variant="ghost" onPress={() => setFlaggingId(r.id)} style={styles.flagButton} />
+                  ) : null}
                 </View>
-                <Text style={styles.amount}>
-                  {r.status === 'skipped' ? '—' : formatCurrency(Number(r.quantity) * Number(r.unit_price))}
-                </Text>
-                <Button label="Flag" variant="ghost" onPress={() => setFlaggingId(r.id)} style={styles.flagButton} />
+                {flag ? (
+                  <View style={{ gap: 2 }}>
+                    <Text style={styles.flagReason}>⚠️ Disputed: "{flag.reason_text}"</Text>
+                    {flag.status === 'resolved' ? (
+                      <Text style={styles.flagResolved}>✓ Resolved{flag.resolution_note ? `: ${flag.resolution_note}` : ''}</Text>
+                    ) : flag.status === 'dismissed' ? (
+                      <Text style={styles.flagDismissed}>✕ Dismissed{flag.resolution_note ? `: ${flag.resolution_note}` : ''}</Text>
+                    ) : (
+                      <Text style={styles.flagOpen}>Waiting for the shop owner's response</Text>
+                    )}
+                  </View>
+                ) : null}
               </Card>
-            )
-          )
+            );
+          })
         )}
 
         {payments.length > 0 ? (
@@ -147,4 +171,8 @@ const styles = StyleSheet.create({
   amount: { fontFamily: fonts.headingBold, fontSize: 14, color: colors.primary },
   flagButton: { minHeight: 30, paddingVertical: 4, paddingHorizontal: spacing.sm },
   sectionTitle: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.textMuted3 },
+  flagReason: { fontFamily: fonts.bodyMedium, fontSize: 12.5, color: colors.warnText },
+  flagResolved: { fontFamily: fonts.bodyMedium, fontSize: 12.5, color: colors.success },
+  flagDismissed: { fontFamily: fonts.bodyMedium, fontSize: 12.5, color: colors.textMuted },
+  flagOpen: { fontFamily: fonts.body, fontSize: 11.5, color: colors.textSecondary, fontStyle: 'italic' },
 });

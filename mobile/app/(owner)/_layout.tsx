@@ -4,6 +4,7 @@ import type { ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, fonts } from '@/constants/theme';
+import { useWebBottomInset } from '@/lib/useWebBottomInset';
 
 function tabIcon(focusedName: keyof typeof Ionicons.glyphMap, unfocusedName: keyof typeof Ionicons.glyphMap) {
   return ({ focused, color, size }: { focused: boolean; color: ColorValue; size: number }) => (
@@ -13,13 +14,12 @@ function tabIcon(focusedName: keyof typeof Ionicons.glyphMap, unfocusedName: key
 
 export default function OwnerLayout() {
   const insets = useSafeAreaInsets();
-  // Native: insets.bottom is the real, reliable gesture/nav-bar height. Web: CSS
-  // env(safe-area-inset-bottom) needs viewport-fit=cover to report anything, but turning
-  // that on makes some mobile browsers lay the page out edge-to-edge under their own
-  // chrome without shrinking the *visible* viewport to match, which pushes fixed-position
-  // content (like this tab bar) further down than before instead of fixing it. A small
-  // fixed buffer is more reliable there than trying to measure the real inset.
-  const bottomPad = Platform.OS === 'web' ? 28 : insets.bottom;
+  // Native: insets.bottom is the real, reliable gesture/nav-bar height. Web: the
+  // mobile browser's own bottom toolbar occludes part of the viewport by a variable
+  // amount that env(safe-area-inset-bottom)/viewport-fit=cover can't measure right
+  // (see useWebBottomInset) -- track it live via window.visualViewport instead.
+  const webInset = useWebBottomInset();
+  const bottomPad = Platform.OS === 'web' ? webInset : insets.bottom;
   return (
     <Tabs
       screenOptions={{
@@ -46,6 +46,8 @@ export default function OwnerLayout() {
       <Tabs.Screen name="customers/[id]" options={{ href: null }} />
       {/* Reached via the settings gear icon in ScreenHeader, not a visible tab. */}
       <Tabs.Screen name="settings/index" options={{ href: null }} />
+      {/* Reached via the "Past Deliveries" link on Today, not a visible tab. */}
+      <Tabs.Screen name="today/history" options={{ href: null }} />
     </Tabs>
   );
 }

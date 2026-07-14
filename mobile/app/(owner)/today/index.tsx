@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
@@ -328,6 +328,20 @@ export default function OwnerToday() {
     }
   }
 
+  // Extras can't go through queueMarkDelivery/upsert_delivery like regular rows do --
+  // that RPC resolves extras' conflicts on client_mutation_id alone with DO NOTHING (by
+  // design, so a replayed offline mutation is a safe no-op rather than a duplicate). A
+  // fresh mutation id for an edit would never match the existing row, so it would insert
+  // a second, duplicate extra instead of correcting the first one. A plain update by the
+  // record's real id is what's actually needed here; RLS (dr_owner_all) already permits it.
+  async function handleEditExtra(row: Row, quantity: number) {
+    if (!row.recordId) return;
+    setRows((prev) => prev.map((r) => (r.key === row.key ? { ...r, actualQuantity: quantity } : r)));
+    setEditingKey(null);
+    await supabase.from('delivery_records').update({ quantity }).eq('id', row.recordId);
+    load();
+  }
+
   async function handleCompleteRemaining() {
     if (!shopId) return;
     if (pendingDeliveryCount === 0) return;
@@ -371,6 +385,10 @@ export default function OwnerToday() {
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
+        <Pressable onPress={() => router.push('/(owner)/today/history')} style={styles.historyLink}>
+          <Text style={styles.historyLinkText}>Past Deliveries ›</Text>
+        </Pressable>
+
         {queuedCount > 0 ? (
           <Card style={styles.syncBanner}>
             <Text style={styles.syncText}>
@@ -419,7 +437,7 @@ export default function OwnerToday() {
                   row={row}
                   itemName={itemMap[row.itemId]?.name ?? 'Item'}
                   onCancel={() => setEditingKey(null)}
-                  onSave={(qty) => queueMarkDelivery(row, { quantity: qty, status: 'changed' })}
+                  onSave={(qty) => (row.isExtra ? handleEditExtra(row, qty) : queueMarkDelivery(row, { quantity: qty, status: 'changed' }))}
                 />
               ) : (
                 <View key={row.key} style={styles.row}>
@@ -438,17 +456,17 @@ export default function OwnerToday() {
                       <Text style={styles.badgeText}>{STATUS_LABEL[row.status]}</Text>
                     </View>
                   ) : null}
-                  {!row.isExtra ? (
-                    row.recordId === null ? (
-                      <View style={styles.actionRow}>
-                        <Button label="Delivered" variant="success" onPress={() => handleDelivered(row)} style={styles.smallButton} />
-                        <Button label="Changed" variant="primary" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
-                        <Button label="Skip" variant="neutral" onPress={() => handleSkipped(row)} style={styles.smallButton} />
-                      </View>
-                    ) : (
-                      <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
-                    )
-                  ) : null}
+                  {row.isExtra ? (
+                    <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
+                  ) : row.recordId === null ? (
+                    <View style={styles.actionRow}>
+                      <Button label="Delivered" variant="success" onPress={() => handleDelivered(row)} style={styles.smallButton} />
+                      <Button label="Changed" variant="primary" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
+                      <Button label="Skip" variant="neutral" onPress={() => handleSkipped(row)} style={styles.smallButton} />
+                    </View>
+                  ) : (
+                    <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
+                  )}
                 </View>
               )
             )}
@@ -556,6 +574,8 @@ function badgeStyleFor(status: DeliveryStatus) {
 
 const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, gap: spacing.md },
+  historyLink: { alignSelf: 'flex-end' },
+  historyLinkText: { fontFamily: fonts.bodySemiBold, fontSize: 13, color: colors.primary },
   customerName: { fontFamily: fonts.headingBold, fontSize: 15, color: colors.textPrimary },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   itemLine: { fontFamily: fonts.bodySemiBold, fontSize: 14, color: colors.textPrimary },

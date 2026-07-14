@@ -13,17 +13,15 @@ function tabIcon(focusedName: keyof typeof Ionicons.glyphMap, unfocusedName: key
 
 export default function CustomerLayout() {
   const insets = useSafeAreaInsets();
-  // Native: insets.bottom is the real, reliable gesture/nav-bar height. Web: CSS
-  // env(safe-area-inset-bottom) needs viewport-fit=cover to report anything, but turning
-  // that on makes some mobile browsers lay the page out edge-to-edge under their own
-  // chrome without shrinking the *visible* viewport to match, which pushes fixed-position
-  // content (like this tab bar) further down than before instead of fixing it. A
-  // window.visualViewport-based live measurement was tried and reverted 2026-07-15 --
-  // it computed a stale/runaway value on at least one real load (desktop Chrome mweb
-  // preview), inflating the bar's padding enough to push its labels below the visible
-  // viewport (body has overflow:hidden) -- i.e. made the white-strip bug worse, not
-  // better. Back to a fixed guess until there's a safer way to measure this live.
-  const bottomPad = Platform.OS === 'web' ? 28 : insets.bottom;
+  // Native: insets.bottom is the real, reliable gesture/nav-bar height. Web: every
+  // attempt to *compensate* for the phone/browser's own bottom chrome (viewport-fit=cover,
+  // then a window.visualViewport measurement) made the bar worse, not better -- see
+  // handover.md's "Bottom tab bar on mobile web" section. That buffer's own assumption
+  // (that mweb needs extra padding to clear the OS nav bar) was never actually confirmed;
+  // the "white strip" users reported may just have been this buffer's blank space. Testing
+  // with zero buffer on web (2026-07-15) to see if the browser already accounts for the
+  // real viewport correctly without any compensation at all.
+  const bottomPad = Platform.OS === 'web' ? 0 : insets.bottom;
   return (
     <Tabs
       screenOptions={{

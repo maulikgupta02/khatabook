@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { supabase } from '@/lib/supabase/client';
 import { formatCurrency, formatMonth, formatDate } from '@/lib/format';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
@@ -52,6 +53,9 @@ export default function PublicBill() {
 
   return (
     <View style={styles.wrap}>
+      {/* Light background reaches the top here (centered card layout), so dark status
+          bar icons read correctly against it. */}
+      <StatusBar style="dark" />
       <View style={styles.card}>
         <View style={styles.header}>
           <View style={styles.logoCircle}>

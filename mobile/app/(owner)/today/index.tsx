@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
+import { router } from 'expo-router';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '@/lib/supabase/client';
@@ -60,6 +61,7 @@ export default function OwnerToday() {
   const [usingCache, setUsingCache] = useState(false);
   const [queuedCount, setQueuedCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [search, setSearch] = useState('');
 
   const rowsFromServer = useCallback((snapshot: TodaySnapshot): Row[] => {
     const expectedRows: Row[] = snapshot.expected.map((e) => ({
@@ -235,6 +237,12 @@ export default function OwnerToday() {
       .sort((a, b) => customerMap[a[0]].name.localeCompare(customerMap[b[0]].name));
   }, [rows, customerMap]);
 
+  const filteredRowsByCustomer = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rowsByCustomer;
+    return rowsByCustomer.filter(([customerId]) => customerMap[customerId].name.toLowerCase().includes(q));
+  }, [rowsByCustomer, customerMap, search]);
+
   const pendingDeliveryCount = rows.filter((r) => !r.isExtra && r.recordId === null).length;
   const doneCount = rows.filter((r) => r.recordId !== null).length;
 
@@ -344,7 +352,7 @@ export default function OwnerToday() {
   if (shopLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Today's Deliveries" />
+        <ScreenHeader title="Today's Deliveries" onSettingsPress={() => router.push('/(owner)/settings/index')} />
         <View style={{ padding: spacing.xl }}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -357,6 +365,7 @@ export default function OwnerToday() {
       <ScreenHeader
         title="Today's Deliveries"
         subtitle={`${doneCount} of ${rows.length} done · ${pendingDeliveryCount} pending${usingCache ? ' · offline (cached)' : ''}`}
+        onSettingsPress={() => router.push('/(owner)/settings/index')}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -386,11 +395,21 @@ export default function OwnerToday() {
           <ExtraItemForm customers={customers} items={items} onSave={handleAddExtra} />
         ) : null}
 
+        {rowsByCustomer.length > 0 ? (
+          <TextField label="Search" value={search} onChangeText={setSearch} placeholder="Customer name" />
+        ) : null}
+
         {rowsByCustomer.length === 0 ? (
           <ComingSoon note="No deliveries expected today. Set up customers and recurring items to see them here." />
         ) : null}
 
-        {rowsByCustomer.map(([customerId, customerRows]) => (
+        {rowsByCustomer.length > 0 && filteredRowsByCustomer.length === 0 ? (
+          <Card>
+            <Text style={styles.qtyLine}>No customers match "{search}".</Text>
+          </Card>
+        ) : null}
+
+        {filteredRowsByCustomer.map(([customerId, customerRows]) => (
           <Card key={customerId} style={{ gap: spacing.sm }}>
             <Text style={styles.customerName}>{customerMap[customerId].name}</Text>
             {customerRows.map((row) =>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, Pressable } from 'react-native';
+import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { formatCurrency, todayIso } from '@/lib/format';
@@ -55,14 +56,18 @@ export default function OwnerItems() {
   if (shopLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Items & Pricing" />
+        <ScreenHeader title="Items & Pricing" onSettingsPress={() => router.push('/(owner)/settings/index')} />
       </View>
     );
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <ScreenHeader title="Items & Pricing" subtitle={`${items.length} item${items.length === 1 ? '' : 's'}`} />
+      <ScreenHeader
+        title="Items & Pricing"
+        subtitle={`${items.length} item${items.length === 1 ? '' : 's'}`}
+        onSettingsPress={() => router.push('/(owner)/settings/index')}
+      />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
@@ -166,6 +171,8 @@ function AddItemForm({ shopId, onDone }: { shopId: string; onDone: () => void })
 }
 
 function EditPriceForm({ item, onDone }: { item: ItemWithPrice; onDone: () => void }) {
+  const [name, setName] = useState(item.name);
+  const [unit, setUnit] = useState(item.unit);
   const [price, setPrice] = useState(item.currentPrice !== null ? String(item.currentPrice) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,21 +180,34 @@ function EditPriceForm({ item, onDone }: { item: ItemWithPrice; onDone: () => vo
   async function handleSave() {
     setError(null);
     const priceNum = Number(price);
+    if (!name.trim() || !unit.trim()) {
+      setError('Name and unit are required.');
+      return;
+    }
     if (!price || Number.isNaN(priceNum) || priceNum <= 0) {
       setError('Enter a valid price.');
       return;
     }
     setSaving(true);
     try {
-      const { error: priceError } = await supabase.rpc('set_item_price', {
-        p_item_id: item.id,
-        p_price: priceNum,
-        p_effective_from: todayIso(),
-      });
-      if (priceError) throw priceError;
+      if (name.trim() !== item.name || unit.trim() !== item.unit) {
+        const { error: detailsError } = await supabase
+          .from('items')
+          .update({ name: name.trim(), unit: unit.trim() })
+          .eq('id', item.id);
+        if (detailsError) throw detailsError;
+      }
+      if (priceNum !== item.currentPrice) {
+        const { error: priceError } = await supabase.rpc('set_item_price', {
+          p_item_id: item.id,
+          p_price: priceNum,
+          p_effective_from: todayIso(),
+        });
+        if (priceError) throw priceError;
+      }
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update price');
+      setError(e instanceof Error ? e.message : 'Could not save changes');
     } finally {
       setSaving(false);
     }
@@ -195,12 +215,13 @@ function EditPriceForm({ item, onDone }: { item: ItemWithPrice; onDone: () => vo
 
   return (
     <Card style={{ gap: spacing.md }}>
-      <Text style={styles.itemName}>{item.name}</Text>
-      <TextField label={`New price (effective today)`} value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
+      <TextField label="Item name" value={name} onChangeText={setName} placeholder="Full Cream Milk" />
+      <TextField label="Unit" value={unit} onChangeText={setUnit} placeholder="litre / packet / kg" />
+      <TextField label="New price (effective today)" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         <Button label="Cancel" variant="neutral" onPress={onDone} style={{ flex: 1 }} />
-        <Button label="Save Price" onPress={handleSave} loading={saving} style={{ flex: 1 }} />
+        <Button label="Save Changes" onPress={handleSave} loading={saving} style={{ flex: 1 }} />
       </View>
     </Card>
   );

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { router } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase/client';
 import { functionErrorMessage } from '@/lib/supabase/invokeError';
 import { Button } from '@/components/Button';
@@ -10,6 +12,7 @@ import { colors, fonts, radii, spacing } from '@/constants/theme';
 type Role = 'owner' | 'customer';
 
 export default function Login() {
+  const insets = useSafeAreaInsets();
   const [role, setRole] = useState<Role>('owner');
   const [identifier, setIdentifier] = useState(''); // email (owner) or mobile (customer)
   const [password, setPassword] = useState('');
@@ -53,12 +56,15 @@ export default function Login() {
       style={{ flex: 1, backgroundColor: colors.bgPage }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll}>
+      {/* Light background reaches the top here (unlike the colored ScreenHeader on
+          every other screen), so dark status bar icons read correctly against it. */}
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.xl }]}>
         <View style={styles.header}>
           <View style={styles.logoCircle}>
-            <Text style={styles.logoLetter}>G</Text>
+            <Text style={styles.logoLetter}>K</Text>
           </View>
-          <Text style={styles.title}>Gupta Dairy</Text>
+          <Text style={styles.title}>Khatabook</Text>
           <Text style={styles.subtitle}>Delivery Manager</Text>
         </View>
 

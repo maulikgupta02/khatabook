@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useCustomer } from '@/lib/supabase/useCustomer';
 import { formatCurrency, todayIso } from '@/lib/format';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { logout } from '@/lib/supabase/logout';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Card } from '@/components/Card';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
@@ -48,7 +49,7 @@ export default function CustomerHome() {
   if (customerLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="Today's Delivery" />
+        <ScreenHeader title="Today's Delivery" onLogout={logout} />
         <View style={{ padding: spacing.xl }}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -58,7 +59,7 @@ export default function CustomerHome() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <ScreenHeader title="Today's Delivery" subtitle={customer?.name} />
+      <ScreenHeader title="Today's Delivery" subtitle={customer?.name} onLogout={logout} />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}

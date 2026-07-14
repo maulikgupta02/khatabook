@@ -10,7 +10,7 @@ export async function sendWhatsApp(
   admin: SupabaseClient,
   opts: {
     shopId: string;
-    customerId: string;
+    customerId: string | null;
     to: string;
     templateName: string;
     bodyParams: string[];

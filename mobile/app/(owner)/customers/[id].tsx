@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { functionErrorMessage } from '@/lib/supabase/invokeError';
@@ -34,10 +35,13 @@ export default function CustomerDetail() {
   const [loading, setLoading] = useState(true);
   const [showRuleForm, setShowRuleForm] = useState(false);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [resetPassword, setResetPassword] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [billLink, setBillLink] = useState<string | null>(null);
   const [billLoading, setBillLoading] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'deactivate' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -75,6 +79,14 @@ export default function CustomerDetail() {
     load();
   }
 
+  function handleDeactivatePress() {
+    if (!customer) return;
+    // Activating is safe and reversible -- only deactivating (which drops them off
+    // Today's list) needs a confirm step.
+    if (customer.is_active) setConfirmAction('deactivate');
+    else handleToggleActive();
+  }
+
   async function handleRegeneratePassword() {
     if (!customer) return;
     setResetting(true);
@@ -92,6 +104,13 @@ export default function CustomerDetail() {
     } finally {
       setResetting(false);
     }
+  }
+
+  async function handleConfirmYes() {
+    const action = confirmAction;
+    setConfirmAction(null);
+    if (action === 'deactivate') await handleToggleActive();
+    else if (action === 'reset') await handleRegeneratePassword();
   }
 
   async function handleToggleRuleActive(rule: RecurringRule) {
@@ -117,6 +136,24 @@ export default function CustomerDetail() {
     } finally {
       setBillLoading(false);
     }
+  }
+
+  async function handleCopyBillLink() {
+    if (!billLink) return;
+    await Clipboard.setStringAsync(billLink);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
+
+  // wa.me is the standard "click to chat" link WhatsApp itself provides for a user
+  // manually sharing something via their own WhatsApp -- distinct from the automated
+  // business messages in _shared/whatsapp.ts, which go through the official Meta Cloud
+  // API per this project's stack decision. This just opens the owner's own WhatsApp
+  // with the message pre-filled; nothing is sent automatically.
+  function handleShareBillLinkOnWhatsApp() {
+    if (!billLink || !customer) return;
+    const message = `Hi ${customer.name}, here's your bill: ${billLink}`;
+    Linking.openURL(`https://wa.me/${customer.mobile}?text=${encodeURIComponent(message)}`);
   }
 
   if (loading || !customer) {
@@ -146,26 +183,66 @@ export default function CustomerDetail() {
       <ScreenHeader title={customer.name} subtitle={customer.mobile} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <Card style={{ gap: spacing.sm }}>
-          <Text style={styles.sectionTitle}>Contact</Text>
-          <Text style={styles.field}>{customer.address}</Text>
-          {customer.delivery_notes ? <Text style={styles.notes}>{customer.delivery_notes}</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-            <Button
-              label={customer.is_active ? 'Deactivate' : 'Activate'}
-              variant={customer.is_active ? 'neutral' : 'success'}
-              onPress={handleToggleActive}
-              style={{ flex: 1 }}
-            />
-            <Button label="Reset Password" variant="ghost" onPress={handleRegeneratePassword} loading={resetting} style={{ flex: 1 }} />
+          <View style={styles.rulesHeader}>
+            <Text style={styles.sectionTitle}>Contact</Text>
+            <Button label={showEditForm ? 'Cancel' : 'Edit'} variant="ghost" onPress={() => setShowEditForm((v) => !v)} style={styles.smallButton} />
           </View>
+
+          {showEditForm ? (
+            <EditCustomerForm
+              customer={customer}
+              onDone={() => {
+                setShowEditForm(false);
+                load();
+              }}
+            />
+          ) : (
+            <>
+              <Text style={styles.field}>{customer.address}</Text>
+              {customer.delivery_notes ? <Text style={styles.notes}>{customer.delivery_notes}</Text> : null}
+            </>
+          )}
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {confirmAction ? (
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              <Text style={styles.notes}>
+                {confirmAction === 'deactivate'
+                  ? 'Deactivate this customer? They will drop off Today\'s list until reactivated.'
+                  : "Reset this customer's password? Their current password stops working immediately."}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button label="Cancel" variant="neutral" onPress={() => setConfirmAction(null)} style={{ flex: 1 }} />
+                <Button label="Yes, Continue" variant="danger" onPress={handleConfirmYes} style={{ flex: 1 }} />
+              </View>
+            </View>
+          ) : !showEditForm ? (
+            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
+              <Button
+                label={customer.is_active ? 'Deactivate' : 'Activate'}
+                variant={customer.is_active ? 'neutral' : 'success'}
+                onPress={handleDeactivatePress}
+                style={{ flex: 1 }}
+              />
+              <Button label="Reset Password" variant="ghost" onPress={() => setConfirmAction('reset')} loading={resetting} style={{ flex: 1 }} />
+            </View>
+          ) : null}
         </Card>
 
         <Card style={{ gap: spacing.sm }}>
           <Text style={styles.sectionTitle}>Balance Due</Text>
           <Text style={styles.balance}>{balance !== null ? formatCurrency(balance) : '—'}</Text>
           <Button label="Share This Month's Bill Link" variant="ghost" onPress={handleGenerateBillLink} loading={billLoading} />
-          {billLink ? <Text selectable style={styles.billLink}>{billLink}</Text> : null}
+          {billLink ? (
+            <View style={{ gap: spacing.sm }}>
+              <Text selectable style={styles.billLink}>{billLink}</Text>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button label={linkCopied ? 'Copied!' : 'Copy Link'} variant="neutral" onPress={handleCopyBillLink} style={{ flex: 1 }} />
+                <Button label="Share on WhatsApp" variant="success" onPress={handleShareBillLinkOnWhatsApp} style={{ flex: 1 }} />
+              </View>
+            </View>
+          ) : null}
         </Card>
 
         <View style={styles.rulesHeader}>
@@ -267,6 +344,46 @@ export default function CustomerDetail() {
           );
         })}
       </ScrollView>
+    </View>
+  );
+}
+
+function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: () => void }) {
+  const [name, setName] = useState(customer.name);
+  const [address, setAddress] = useState(customer.address);
+  const [notes, setNotes] = useState(customer.delivery_notes ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setError(null);
+    if (!name.trim() || !address.trim()) {
+      setError('Name and address are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: updateError } = await supabase
+        .from('customers')
+        .update({ name: name.trim(), address: address.trim(), delivery_notes: notes.trim() || null })
+        .eq('id', customer.id);
+      if (updateError) throw updateError;
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save changes');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <View style={{ gap: spacing.md }}>
+      <TextField label="Name" value={name} onChangeText={setName} placeholder="Customer name" />
+      <TextField label="Address" value={address} onChangeText={setAddress} placeholder="Delivery address" multiline />
+      <TextField label="Delivery notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. leave with watchman" />
+      <Text style={styles.notes}>Mobile number can't be changed here since it's the customer's login.</Text>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button label="Save Changes" onPress={handleSave} loading={saving} />
     </View>
   );
 }

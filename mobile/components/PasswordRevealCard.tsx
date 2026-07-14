@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Button } from '@/components/Button';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
 
@@ -11,6 +13,14 @@ export function PasswordRevealCard({
   password: string;
   onDone: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await Clipboard.setStringAsync(password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Login created for {name}</Text>
@@ -21,6 +31,7 @@ export function PasswordRevealCard({
       <View style={styles.passwordBox}>
         <Text style={styles.password}>{password}</Text>
       </View>
+      <Button label={copied ? 'Copied!' : 'Copy Password'} variant="neutral" onPress={handleCopy} />
       <Button label="Done" onPress={onDone} />
     </View>
   );

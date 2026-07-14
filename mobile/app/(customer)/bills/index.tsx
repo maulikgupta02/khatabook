@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 import { useCustomer } from '@/lib/supabase/useCustomer';
 import { formatCurrency, formatMonth } from '@/lib/format';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { logout } from '@/lib/supabase/logout';
 import { ComingSoon } from '@/components/ComingSoon';
 import { Card } from '@/components/Card';
 import { colors, fonts, spacing } from '@/constants/theme';
@@ -50,7 +51,7 @@ export default function CustomerBills() {
   if (customerLoading || loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-        <ScreenHeader title="My Bill" />
+        <ScreenHeader title="My Bill" onLogout={logout} />
         <View style={{ padding: spacing.xl }}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -60,7 +61,7 @@ export default function CustomerBills() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <ScreenHeader title="My Bill" />
+      <ScreenHeader title="My Bill" onLogout={logout} />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}

@@ -11,6 +11,7 @@
 // verify_jwt is off for this function in config.toml -- Meta calls it unauthenticated, so
 // the verify token below (a secret only you and Meta know) is what stands in for auth.
 import { adminClient } from '../_shared/clients.ts';
+import { logToDiscord } from '../_shared/discord.ts';
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -22,8 +23,10 @@ Deno.serve(async (req) => {
     const expectedToken = Deno.env.get('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
 
     if (mode === 'subscribe' && expectedToken && token === expectedToken) {
+      await logToDiscord('✅ WhatsApp webhook verification succeeded (Meta confirmed the callback URL).');
       return new Response(challenge ?? '', { status: 200 });
     }
+    await logToDiscord(`❌ WhatsApp webhook verification failed. mode=${mode} tokenMatch=${token === expectedToken}`);
     return new Response('Forbidden', { status: 403 });
   }
 
@@ -31,6 +34,10 @@ Deno.serve(async (req) => {
     try {
       const body = await req.json();
       const admin = adminClient();
+
+      // Counts only -- no phone numbers or message content ever leave Supabase.
+      const statusCounts: Record<string, number> = {};
+      let inboundCount = 0;
 
       for (const entry of body.entry ?? []) {
         for (const change of entry.changes ?? []) {
@@ -44,15 +51,23 @@ Deno.serve(async (req) => {
               .from('whatsapp_log')
               .update({ status: nextStatus })
               .eq('provider_message_id', status.id);
+            statusCounts[nextStatus] = (statusCounts[nextStatus] ?? 0) + 1;
           }
 
-          // Inbound messages: this app is send-only today (no reply UI/feature), so we
-          // just acknowledge receipt rather than persist them anywhere.
+          // Inbound messages: this app is send-only today (no reply UI/feature) and doesn't
+          // persist these anywhere -- just a redacted count so an unexpected reply is noticed.
+          inboundCount += (value.messages ?? []).length;
         }
       }
 
+      const parts: string[] = [];
+      for (const [status, count] of Object.entries(statusCounts)) parts.push(`${count} ${status}`);
+      if (inboundCount > 0) parts.push(`${inboundCount} inbound (redacted)`);
+      if (parts.length > 0) await logToDiscord(`📬 WhatsApp webhook: ${parts.join(', ')}`);
+
       return new Response('EVENT_RECEIVED', { status: 200 });
     } catch {
+      await logToDiscord('⚠️ WhatsApp webhook POST failed to parse a payload.');
       // Still 200 -- a malformed payload isn't something Meta should retry indefinitely.
       return new Response('EVENT_RECEIVED', { status: 200 });
     }

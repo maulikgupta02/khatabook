@@ -2,7 +2,7 @@
 // with mobile+password. Returns the generated password once -- it is never stored
 // in plaintext and never shown again after this response.
 import { corsHeaders } from '../_shared/cors.ts';
-import { adminClient, callerClient, randomPassword } from '../_shared/clients.ts';
+import { adminClient, callerClient, defaultPassword } from '../_shared/clients.ts';
 import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 Deno.serve(async (req) => {
@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     const shopId = profile.shop_id as string;
     const admin = adminClient();
     const internalEmail = `cust-${shopId}-${mobile}@internal.khatabook.app`;
-    const password = randomPassword();
+    const password = defaultPassword();
 
     const { data: authUser, error: createAuthError } = await admin.auth.admin.createUser({
       email: internalEmail,
@@ -63,8 +63,8 @@ Deno.serve(async (req) => {
       shopId,
       customerId: customer.id,
       to: mobile,
-      templateName: 'customer_welcome',
-      bodyParams: [shop?.name ?? 'your shop', mobile, password],
+      templateName: 'customer_welcome_v4',
+      bodyParams: [shop?.name ?? 'your shop'],
     });
 
     return new Response(JSON.stringify({ customer, password }), {

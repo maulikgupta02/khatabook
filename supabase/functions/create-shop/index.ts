@@ -5,7 +5,7 @@
 // user is signed in yet when a shop is first being created. Only whoever holds
 // the service role secret (i.e. us, via a script) can call this.
 import { corsHeaders } from '../_shared/cors.ts';
-import { adminClient, randomPassword } from '../_shared/clients.ts';
+import { adminClient, defaultPassword } from '../_shared/clients.ts';
 import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 const SHOP_CATEGORIES = ['milk', 'kirana', 'tiffin', 'newspaper', 'other'];
@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     const shopCategory = category && SHOP_CATEGORIES.includes(category) ? category : 'other';
 
     const admin = adminClient();
-    const password = randomPassword();
+    const password = defaultPassword();
 
     const { data: authUser, error: createAuthError } = await admin.auth.admin.createUser({
       email: owner_email,
@@ -64,8 +64,8 @@ Deno.serve(async (req) => {
         shopId: shop.id,
         customerId: null,
         to: owner_phone,
-        templateName: 'shop_owner_welcome',
-        bodyParams: [owner_name, shop_name, owner_email, password],
+        templateName: 'shop_owner_welcome_v4',
+        bodyParams: [owner_name, shop_name],
       });
     }
 

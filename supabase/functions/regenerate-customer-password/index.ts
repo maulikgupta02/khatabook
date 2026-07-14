@@ -1,5 +1,5 @@
 import { corsHeaders } from '../_shared/cors.ts';
-import { adminClient, callerClient, randomPassword } from '../_shared/clients.ts';
+import { adminClient, callerClient, defaultPassword } from '../_shared/clients.ts';
 import { sendWhatsApp } from '../_shared/whatsapp.ts';
 
 Deno.serve(async (req) => {
@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
     if (!profile || profile.shop_id !== customer.shop_id) throw new Error('Not authorized');
     if (!customer.auth_user_id) throw new Error('Customer has no login account');
 
-    const password = randomPassword();
+    const password = defaultPassword();
     const admin = adminClient();
     const { error: updateError } = await admin.auth.admin.updateUserById(customer.auth_user_id, { password });
     if (updateError) throw updateError;
@@ -40,8 +40,8 @@ Deno.serve(async (req) => {
       shopId: customer.shop_id,
       customerId: customer.id,
       to: customer.mobile,
-      templateName: 'password_reset',
-      bodyParams: [shop?.name ?? 'your shop', password],
+      templateName: 'password_reset_v3',
+      bodyParams: [shop?.name ?? 'your shop'],
     });
 
     return new Response(JSON.stringify({ password }), {

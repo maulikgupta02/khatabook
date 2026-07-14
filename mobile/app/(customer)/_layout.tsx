@@ -19,7 +19,7 @@ export default function CustomerLayout() {
   // chrome without shrinking the *visible* viewport to match, which pushes fixed-position
   // content (like this tab bar) further down than before instead of fixing it. A small
   // fixed buffer is more reliable there than trying to measure the real inset.
-  const bottomPad = Platform.OS === 'web' ? 16 : insets.bottom;
+  const bottomPad = Platform.OS === 'web' ? 28 : insets.bottom;
   return (
     <Tabs
       screenOptions={{

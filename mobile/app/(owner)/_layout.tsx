@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
 import type { ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,21 +13,24 @@ function tabIcon(focusedName: keyof typeof Ionicons.glyphMap, unfocusedName: key
 
 export default function OwnerLayout() {
   const insets = useSafeAreaInsets();
+  // Native: insets.bottom is the real, reliable gesture/nav-bar height. Web: CSS
+  // env(safe-area-inset-bottom) needs viewport-fit=cover to report anything, but turning
+  // that on makes some mobile browsers lay the page out edge-to-edge under their own
+  // chrome without shrinking the *visible* viewport to match, which pushes fixed-position
+  // content (like this tab bar) further down than before instead of fixing it. A small
+  // fixed buffer is more reliable there than trying to measure the real inset.
+  const bottomPad = Platform.OS === 'web' ? 16 : insets.bottom;
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        // insets.bottom accounts for the phone's own gesture/nav bar (native) or the
-        // browser chrome's safe-area-inset-bottom (mweb, once +html.tsx sets
-        // viewport-fit=cover) -- without it the last row of icons/labels sits underneath
-        // that bar instead of above it.
         tabBarStyle: {
           borderTopColor: colors.borderCard,
           backgroundColor: colors.white,
-          height: 56 + insets.bottom,
-          paddingBottom: insets.bottom + 6,
+          height: 56 + bottomPad,
+          paddingBottom: bottomPad + 6,
           paddingTop: 6,
         },
         tabBarLabelStyle: { fontFamily: fonts.bodySemiBold, fontSize: 12 },

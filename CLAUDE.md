@@ -2,6 +2,8 @@
 
 Multi-tenant SaaS for milk/kirana/tiffin/newspaper vendors to track daily deliveries and billing. Full spec and phased build plan: see the plan history (design doc: claude.ai/design project `7f185fc3-a8c2-4082-9a39-cd7270cfd846`, file `Delivery Manager.dc.html`).
 
+**Before doing anything else, check for `handover.md` at the repo root** (gitignored, local-only). It holds the live/current running context this file deliberately doesn't: credentials and IDs (Supabase project ref, service_role key, WhatsApp/Discord secrets), deployed URLs, WhatsApp template approval status, test data, and an open-items list — everything needed to continue across sessions or a fresh agent without re-deriving it. This file (`CLAUDE.md`) stays scoped to durable architecture and design decisions; keep transient/credential state in `handover.md` instead, and update it as things change.
+
 ## Stack (deliberate departure from the global default Python/FastAPI stack)
 
 - **Frontend**: one Expo Router app (`mobile/`) — React Native + Expo Web serves shop-owner role, customer role, AND the mobile website from a single codebase.
@@ -38,4 +40,4 @@ Multi-tenant SaaS for milk/kirana/tiffin/newspaper vendors to track daily delive
 
 Every phase's Postgres/RLS/RPC/Edge-Function layer has been exercised end-to-end against a real local Supabase instance (signup → shop/customer creation → deliveries → billing → WhatsApp logging → offline RPC idempotency → reports), including adversarial cases (cross-shop RLS isolation, duplicate mutation replay, bogus bill tokens). The Expo app has been verified to typecheck clean after every phase. `npx expo export -p web` (the actual production build, as opposed to the dev-mode `expo start --web` bundler) was first run when setting up the Vercel deploy and failed on an unresolved `expo-sqlite` wasm import — fixed via `lib/offline/db.web.ts`; see the mweb deploy note above. Treat "bundles for web" claims as meaning `expo export -p web` specifically from here on, not the dev server. The app still has **not** been visually exercised in a running browser/emulator/device — that would need `cd mobile && npx expo start` (web) or a native emulator/device, neither of which this environment can drive interactively. Do the first real click-through there before treating any screen as production-ready.
 
-Current phase status is tracked in the session's task list, not here.
+Current phase status and running/deployment state are tracked in `handover.md`, not here.

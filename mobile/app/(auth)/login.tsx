@@ -8,8 +8,10 @@ import { functionErrorMessage } from '@/lib/supabase/invokeError';
 import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
+import { digitsOnly, isValidLocalMobile, toStoredMobile } from '@/lib/format';
 
 type Role = 'owner' | 'customer';
+type ShopSession = { shop_id: string; shop_name: string; access_token: string; refresh_token: string };
 
 export default function Login() {
   const insets = useSafeAreaInsets();
@@ -18,9 +20,14 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shopChoices, setShopChoices] = useState<ShopSession[] | null>(null);
 
   async function handleLogin() {
     setError(null);
+    if (role === 'customer' && !isValidLocalMobile(identifier)) {
+      setError('Mobile number must be exactly 10 digits.');
+      return;
+    }
     setLoading(true);
     try {
       if (role === 'owner') {
@@ -32,11 +39,16 @@ export default function Login() {
         router.replace('/(owner)/today');
       } else {
         const { data, error: fnError } = await supabase.functions.invoke('resolve-customer-login', {
-          body: { mobile: identifier.trim(), password },
+          body: { mobile: toStoredMobile(identifier), password },
         });
-        if (fnError || !data?.access_token) {
+        if (fnError || !data) {
           throw new Error(await functionErrorMessage(fnError, 'Invalid mobile number or password'));
         }
+        if (data.requires_shop_selection) {
+          setShopChoices(data.shops as ShopSession[]);
+          return;
+        }
+        if (!data.access_token) throw new Error('Invalid mobile number or password');
         const { error: setSessionError } = await supabase.auth.setSession({
           access_token: data.access_token,
           refresh_token: data.refresh_token,
@@ -49,6 +61,58 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSelectShop(shop: ShopSession) {
+    setError(null);
+    setLoading(true);
+    try {
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: shop.access_token,
+        refresh_token: shop.refresh_token,
+      });
+      if (setSessionError) throw setSessionError;
+      router.replace('/(customer)/home');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (shopChoices) {
+    return (
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bgPage }}>
+        <StatusBar style="dark" />
+        <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.xl }]}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Which shop?</Text>
+            <Text style={styles.subtitle}>You're a customer at more than one shop.</Text>
+          </View>
+          <View style={styles.card}>
+            {shopChoices.map((shop) => (
+              <Button
+                key={shop.shop_id}
+                label={shop.shop_name}
+                variant="neutral"
+                loading={loading}
+                onPress={() => handleSelectShop(shop)}
+              />
+            ))}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            <Button
+              label="Back"
+              variant="neutral"
+              onPress={() => {
+                setShopChoices(null);
+                setError(null);
+              }}
+              style={{ marginTop: spacing.sm }}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
   }
 
   return (
@@ -69,18 +133,35 @@ export default function Login() {
         </View>
 
         <View style={styles.tabs}>
-          <RoleTab label="Shop Owner" active={role === 'owner'} onPress={() => setRole('owner')} />
-          <RoleTab label="Customer" active={role === 'customer'} onPress={() => setRole('customer')} />
+          <RoleTab
+            label="Shop Owner"
+            active={role === 'owner'}
+            onPress={() => {
+              setRole('owner');
+              setIdentifier('');
+              setError(null);
+            }}
+          />
+          <RoleTab
+            label="Customer"
+            active={role === 'customer'}
+            onPress={() => {
+              setRole('customer');
+              setIdentifier('');
+              setError(null);
+            }}
+          />
         </View>
 
         <View style={styles.card}>
           <TextField
-            label={role === 'owner' ? 'Email' : 'Mobile Number'}
+            label={role === 'owner' ? 'Email' : 'Mobile Number (+91)'}
             value={identifier}
-            onChangeText={setIdentifier}
+            onChangeText={(v) => setIdentifier(role === 'owner' ? v : digitsOnly(v, 10))}
             autoCapitalize="none"
-            keyboardType={role === 'owner' ? 'email-address' : 'phone-pad'}
-            placeholder={role === 'owner' ? 'you@example.com' : '98XXXXXXXX'}
+            keyboardType={role === 'owner' ? 'email-address' : 'number-pad'}
+            maxLength={role === 'owner' ? undefined : 10}
+            placeholder={role === 'owner' ? 'you@example.com' : '10-digit number'}
           />
           <TextField
             label="Password"

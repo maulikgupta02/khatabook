@@ -5,7 +5,18 @@ import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { functionErrorMessage } from '@/lib/supabase/invokeError';
-import { formatDaysOfWeek, DAY_LABELS, todayIso, currentMonthIso, formatCurrency, formatDate } from '@/lib/format';
+import {
+  formatDaysOfWeek,
+  DAY_LABELS,
+  todayIso,
+  currentMonthIso,
+  formatCurrency,
+  formatDate,
+  digitsOnly,
+  isValidLocalMobile,
+  toStoredMobile,
+  fromStoredMobile,
+} from '@/lib/format';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
@@ -125,11 +136,12 @@ export default function CustomerDetail() {
     setDeleting(true);
     setError(null);
     try {
-      const { error: deleteError } = await supabase
-        .from('customers')
-        .update({ deleted_at: new Date().toISOString(), is_active: false })
-        .eq('id', customer.id);
-      if (deleteError) throw deleteError;
+      const { data, error: fnError } = await supabase.functions.invoke('delete-customer', {
+        body: { customer_id: customer.id },
+      });
+      if (fnError || !data?.success) {
+        throw new Error(await functionErrorMessage(fnError, 'Could not delete customer'));
+      }
       router.replace('/(owner)/customers');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not delete customer');
@@ -458,7 +470,7 @@ export default function CustomerDetail() {
 
 function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: () => void }) {
   const [name, setName] = useState(customer.name);
-  const [mobile, setMobile] = useState(customer.mobile);
+  const [mobile, setMobile] = useState(fromStoredMobile(customer.mobile));
   const [address, setAddress] = useState(customer.address);
   const [notes, setNotes] = useState(customer.delivery_notes ?? '');
   const [saving, setSaving] = useState(false);
@@ -470,11 +482,15 @@ function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: ()
       setError('Name, mobile, and address are required.');
       return;
     }
+    if (!isValidLocalMobile(mobile)) {
+      setError('Mobile number must be exactly 10 digits.');
+      return;
+    }
     setSaving(true);
     try {
       const { error: updateError } = await supabase
         .from('customers')
-        .update({ name: name.trim(), mobile: mobile.trim(), address: address.trim(), delivery_notes: notes.trim() || null })
+        .update({ name: name.trim(), mobile: toStoredMobile(mobile), address: address.trim(), delivery_notes: notes.trim() || null })
         .eq('id', customer.id);
       if (updateError) {
         if (updateError.code === '23505') throw new Error('Another customer in this shop already has that mobile number.');
@@ -491,7 +507,14 @@ function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: ()
   return (
     <View style={{ gap: spacing.md }}>
       <TextField label="Name" value={name} onChangeText={setName} placeholder="Customer name" />
-      <TextField label="Mobile" value={mobile} onChangeText={setMobile} placeholder="Mobile number" keyboardType="phone-pad" />
+      <TextField
+        label="Mobile number (+91)"
+        value={mobile}
+        onChangeText={(v) => setMobile(digitsOnly(v, 10))}
+        keyboardType="number-pad"
+        maxLength={10}
+        placeholder="10-digit number"
+      />
       <TextField label="Address" value={address} onChangeText={setAddress} placeholder="Delivery address" multiline />
       <TextField label="Delivery notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. leave with watchman" />
       <Text style={styles.notes}>Changing mobile only updates their saved contact number -- their login stays tied to the account created earlier and isn't affected.</Text>

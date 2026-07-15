@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
+import { useSession } from '@/lib/supabase/useSession';
 import { logout } from '@/lib/supabase/logout';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { Card } from '@/components/Card';
@@ -9,6 +10,7 @@ import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { Chip } from '@/components/Chip';
 import { colors, fonts, spacing } from '@/constants/theme';
+import { digitsOnly, isValidLocalMobile, toStoredMobile, fromStoredMobile } from '@/lib/format';
 import type { Shop, ShopCategory } from '@/lib/supabase/types';
 
 const CATEGORIES: { value: ShopCategory; label: string }[] = [
@@ -51,6 +53,7 @@ export default function OwnerSettings() {
       <ScreenHeader title="Settings" />
       <ScrollView contentContainerStyle={styles.scroll}>
         <ShopDetailsForm shop={shop} onSaved={load} />
+        <OwnerPhoneForm />
         <ChangePasswordForm />
         <Button label="Log Out" variant="danger" onPress={logout} />
       </ScrollView>
@@ -103,6 +106,70 @@ function ShopDetailsForm({ shop, onSaved }: { shop: Shop; onSaved: () => void })
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button label={saved ? 'Saved!' : 'Save Shop Details'} onPress={handleSave} loading={saving} />
+    </Card>
+  );
+}
+
+function OwnerPhoneForm() {
+  const { session } = useSession();
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!session) return;
+    supabase
+      .from('shop_owner_profiles')
+      .select('phone')
+      .eq('user_id', session.user.id)
+      .single()
+      .then(({ data }) => {
+        setPhone(data?.phone ? fromStoredMobile(data.phone) : '');
+        setLoading(false);
+      });
+  }, [session?.user.id]);
+
+  async function handleSave() {
+    if (!session) return;
+    setError(null);
+    setSaved(false);
+    if (!isValidLocalMobile(phone)) {
+      setError('Mobile number must be exactly 10 digits.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: updateError } = await supabase
+        .from('shop_owner_profiles')
+        .update({ phone: toStoredMobile(phone) })
+        .eq('user_id', session.user.id);
+      if (updateError) throw updateError;
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save phone number');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return null;
+
+  return (
+    <Card style={{ gap: spacing.md }}>
+      <Text style={styles.sectionTitle}>Your Phone Number</Text>
+      <TextField
+        label="Mobile number (+91)"
+        value={phone}
+        onChangeText={(v) => setPhone(digitsOnly(v, 10))}
+        keyboardType="number-pad"
+        maxLength={10}
+        placeholder="10-digit number"
+      />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Button label={saved ? 'Saved!' : 'Save Phone Number'} onPress={handleSave} loading={saving} />
     </Card>
   );
 }

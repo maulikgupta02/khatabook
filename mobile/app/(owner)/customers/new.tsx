@@ -9,6 +9,7 @@ import { Button } from '@/components/Button';
 import { TextField } from '@/components/TextField';
 import { PasswordRevealCard } from '@/components/PasswordRevealCard';
 import { colors, fonts, spacing } from '@/constants/theme';
+import { digitsOnly, isValidLocalMobile, toStoredMobile } from '@/lib/format';
 
 export default function NewCustomer() {
   const [name, setName] = useState('');
@@ -39,10 +40,14 @@ export default function NewCustomer() {
       setError('Name, mobile, and address are required.');
       return;
     }
+    if (!isValidLocalMobile(mobile)) {
+      setError('Mobile number must be exactly 10 digits.');
+      return;
+    }
     setSaving(true);
     try {
       const { data, error: fnError } = await supabase.functions.invoke('create-customer', {
-        body: { name: name.trim(), mobile: mobile.trim(), address: address.trim(), delivery_notes: notes.trim() || null },
+        body: { name: name.trim(), mobile: toStoredMobile(mobile), address: address.trim(), delivery_notes: notes.trim() || null },
       });
       if (fnError || !data?.password) {
         throw new Error(await functionErrorMessage(fnError, 'Could not create customer'));
@@ -68,7 +73,14 @@ export default function NewCustomer() {
         ) : (
           <Card style={{ gap: spacing.md }}>
             <TextField label="Name" value={name} onChangeText={setName} placeholder="Customer name" />
-            <TextField label="Mobile number" value={mobile} onChangeText={setMobile} keyboardType="phone-pad" placeholder="98XXXXXXXX" />
+            <TextField
+              label="Mobile number (+91)"
+              value={mobile}
+              onChangeText={(v) => setMobile(digitsOnly(v, 10))}
+              keyboardType="number-pad"
+              maxLength={10}
+              placeholder="10-digit number"
+            />
             <TextField label="Address" value={address} onChangeText={setAddress} placeholder="Delivery address" multiline />
             <TextField label="Delivery notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. leave with watchman" />
             {error ? <Text style={styles.error}>{error}</Text> : null}

@@ -84,17 +84,26 @@ Deno.serve(async (req) => {
       );
     if (billError) throw billError;
 
-    const { data: shop } = await admin.from('shops').select('name').eq('id', customer.shop_id).single();
-    const webBaseUrl = Deno.env.get('PUBLIC_WEB_BASE_URL') ?? 'http://localhost:8081';
-    await sendWhatsApp(admin, {
-      shopId: customer.shop_id,
-      customerId: customer.id,
-      to: customer.mobile,
-      templateName: 'bill_ready',
-      bodyParams: [shop?.name ?? 'your shop', month, totalAmount.toFixed(2), `${webBaseUrl}/bill/${token}`],
+    const { data: pendingBalance, error: balanceError } = await admin.rpc('customer_running_balance', {
+      p_customer_id: customer_id,
     });
+    if (balanceError) throw balanceError;
 
-    return new Response(JSON.stringify({ token, total_amount: totalAmount }), {
+    let whatsappSent = false;
+    if (Number(pendingBalance) > 0) {
+      const { data: shop } = await admin.from('shops').select('name').eq('id', customer.shop_id).single();
+      const webBaseUrl = Deno.env.get('PUBLIC_WEB_BASE_URL') ?? 'http://localhost:8081';
+      await sendWhatsApp(admin, {
+        shopId: customer.shop_id,
+        customerId: customer.id,
+        to: customer.mobile,
+        templateName: 'bill_ready',
+        bodyParams: [shop?.name ?? 'your shop', month, totalAmount.toFixed(2), `${webBaseUrl}/bill/${token}`],
+      });
+      whatsappSent = true;
+    }
+
+    return new Response(JSON.stringify({ token, total_amount: totalAmount, whatsapp_sent: whatsappSent }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });

@@ -1,4 +1,6 @@
-# Khatabook — Daily Delivery Management App
+# DailyKart — Daily Delivery Management App
+
+(Codebase/repo/internal identifiers — slug, scheme, package name, Supabase project_id, internal email domain, SQLite filename — still say "khatabook"; only the user-facing display name changed. See app name history below if reconciling later.)
 
 Multi-tenant SaaS for milk/kirana/tiffin/newspaper vendors to track daily deliveries and billing. Full spec and phased build plan: see the plan history (design doc: claude.ai/design project `7f185fc3-a8c2-4082-9a39-cd7270cfd846`, file `Delivery Manager.dc.html`).
 

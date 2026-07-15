@@ -62,9 +62,9 @@ export default function Login() {
       <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.xl }]}>
         <View style={styles.header}>
           <View style={styles.logoCircle}>
-            <Text style={styles.logoLetter}>K</Text>
+            <Text style={styles.logoLetter}>D</Text>
           </View>
-          <Text style={styles.title}>Khatabook</Text>
+          <Text style={styles.title}>DailyKart</Text>
           <Text style={styles.subtitle}>Delivery Manager</Text>
         </View>
 

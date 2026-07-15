@@ -13,7 +13,7 @@ import { TextField } from '@/components/TextField';
 import { Chip } from '@/components/Chip';
 import { PasswordRevealCard } from '@/components/PasswordRevealCard';
 import { colors, fonts, spacing } from '@/constants/theme';
-import type { Customer, Item, RecurringRule, Payment } from '@/lib/supabase/types';
+import type { Customer, Item, RecurringRule, Payment, PaymentAudit } from '@/lib/supabase/types';
 
 type WhatsAppLogRow = {
   id: string;
@@ -34,14 +34,20 @@ export default function CustomerDetail() {
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [showRuleForm, setShowRuleForm] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [expandedAuditPaymentId, setExpandedAuditPaymentId] = useState<string | null>(null);
+  const [paymentAudits, setPaymentAudits] = useState<Record<string, PaymentAudit[]>>({});
   const [showEditForm, setShowEditForm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [resetPassword, setResetPassword] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
   const [billLink, setBillLink] = useState<string | null>(null);
+  const [billWhatsappSent, setBillWhatsappSent] = useState<boolean | null>(null);
   const [billLoading, setBillLoading] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'deactivate' | 'reset' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'deactivate' | 'reset' | 'delete' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -58,7 +64,7 @@ export default function CustomerDetail() {
           .select('id, template_name, status, error, created_at')
           .eq('customer_id', id)
           .order('created_at', { ascending: false })
-          .limit(10),
+          .limit(3),
       ]);
     setCustomer(c ?? null);
     setItems(itemRows ?? []);
@@ -111,11 +117,45 @@ export default function CustomerDetail() {
     setConfirmAction(null);
     if (action === 'deactivate') await handleToggleActive();
     else if (action === 'reset') await handleRegeneratePassword();
+    else if (action === 'delete') await handleDeleteCustomer();
+  }
+
+  async function handleDeleteCustomer() {
+    if (!customer) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const { error: deleteError } = await supabase
+        .from('customers')
+        .update({ deleted_at: new Date().toISOString(), is_active: false })
+        .eq('id', customer.id);
+      if (deleteError) throw deleteError;
+      router.replace('/(owner)/customers');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not delete customer');
+      setDeleting(false);
+    }
   }
 
   async function handleToggleRuleActive(rule: RecurringRule) {
     await supabase.from('customer_recurring_rules').update({ is_active: !rule.is_active }).eq('id', rule.id);
     load();
+  }
+
+  async function handleToggleAudit(paymentId: string) {
+    if (expandedAuditPaymentId === paymentId) {
+      setExpandedAuditPaymentId(null);
+      return;
+    }
+    setExpandedAuditPaymentId(paymentId);
+    if (!paymentAudits[paymentId]) {
+      const { data } = await supabase
+        .from('payment_audit')
+        .select('*')
+        .eq('payment_id', paymentId)
+        .order('edited_at', { ascending: false });
+      setPaymentAudits((prev) => ({ ...prev, [paymentId]: data ?? [] }));
+    }
   }
 
   async function handleGenerateBillLink() {
@@ -131,6 +171,7 @@ export default function CustomerDetail() {
       }
       const base = process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'http://localhost:8081';
       setBillLink(`${base}/bill/${data.token}`);
+      setBillWhatsappSent(Boolean(data.whatsapp_sent));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not generate bill link');
     } finally {
@@ -210,22 +251,27 @@ export default function CustomerDetail() {
               <Text style={styles.notes}>
                 {confirmAction === 'deactivate'
                   ? 'Deactivate this customer? They will drop off Today\'s list until reactivated.'
-                  : "Reset this customer's password? Their current password stops working immediately."}
+                  : confirmAction === 'reset'
+                  ? "Reset this customer's password? Their current password stops working immediately."
+                  : 'Delete this customer? They will disappear from your customer list. Their past deliveries and payments stay on record.'}
               </Text>
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <Button label="Cancel" variant="neutral" onPress={() => setConfirmAction(null)} style={{ flex: 1 }} />
-                <Button label="Yes, Continue" variant="danger" onPress={handleConfirmYes} style={{ flex: 1 }} />
+                <Button label="Yes, Continue" variant="danger" onPress={handleConfirmYes} loading={confirmAction === 'delete' && deleting} style={{ flex: 1 }} />
               </View>
             </View>
           ) : !showEditForm ? (
-            <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-              <Button
-                label={customer.is_active ? 'Deactivate' : 'Activate'}
-                variant={customer.is_active ? 'neutral' : 'success'}
-                onPress={handleDeactivatePress}
-                style={{ flex: 1 }}
-              />
-              <Button label="Reset Password" variant="ghost" onPress={() => setConfirmAction('reset')} loading={resetting} style={{ flex: 1 }} />
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <Button
+                  label={customer.is_active ? 'Deactivate' : 'Activate'}
+                  variant={customer.is_active ? 'neutral' : 'success'}
+                  onPress={handleDeactivatePress}
+                  style={{ flex: 1 }}
+                />
+                <Button label="Reset Password" variant="ghost" onPress={() => setConfirmAction('reset')} loading={resetting} style={{ flex: 1 }} />
+              </View>
+              <Button label="Delete Customer" variant="danger" onPress={() => setConfirmAction('delete')} />
             </View>
           ) : null}
         </Card>
@@ -237,6 +283,9 @@ export default function CustomerDetail() {
           {billLink ? (
             <View style={{ gap: spacing.sm }}>
               <Text selectable style={styles.billLink}>{billLink}</Text>
+              {billWhatsappSent === false ? (
+                <Text style={styles.billNote}>No pending balance — WhatsApp bill message wasn't auto-sent. Use the buttons below to share manually if needed.</Text>
+              ) : null}
               <View style={{ flexDirection: 'row', gap: spacing.sm }}>
                 <Button label={linkCopied ? 'Copied!' : 'Copy Link'} variant="neutral" onPress={handleCopyBillLink} style={{ flex: 1 }} />
                 <Button label="Share on WhatsApp" variant="success" onPress={handleShareBillLinkOnWhatsApp} style={{ flex: 1 }} />
@@ -267,17 +316,57 @@ export default function CustomerDetail() {
           </Card>
         ) : null}
 
-        {payments.map((p) => (
-          <Card key={p.id} style={styles.ruleCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.field}>{formatCurrency(p.amount)}</Text>
-              <Text style={styles.notes}>
-                {formatDate(p.payment_date)}
-                {p.note ? ` · ${p.note}` : ''}
-              </Text>
-            </View>
-          </Card>
-        ))}
+        {payments.map((p) =>
+          editingPaymentId === p.id ? (
+            <PaymentEditForm
+              key={p.id}
+              payment={p}
+              onDone={() => {
+                setEditingPaymentId(null);
+                setPaymentAudits((prev) => {
+                  const next = { ...prev };
+                  delete next[p.id];
+                  return next;
+                });
+                load();
+              }}
+              onCancel={() => setEditingPaymentId(null)}
+            />
+          ) : (
+            <Card key={p.id} style={{ gap: spacing.xs }}>
+              <View style={styles.ruleCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.field}>{formatCurrency(p.amount)}</Text>
+                  <Text style={styles.notes}>
+                    {formatDate(p.payment_date)}
+                    {p.note ? ` · ${p.note}` : ''}
+                  </Text>
+                </View>
+                <Button label="Edit" variant="ghost" onPress={() => setEditingPaymentId(p.id)} style={styles.smallButton} />
+              </View>
+              <Button
+                label={expandedAuditPaymentId === p.id ? 'Hide History' : 'View History'}
+                variant="ghost"
+                onPress={() => handleToggleAudit(p.id)}
+                style={styles.historyButton}
+              />
+              {expandedAuditPaymentId === p.id ? (
+                <View style={{ gap: 4 }}>
+                  {(paymentAudits[p.id] ?? []).length === 0 ? (
+                    <Text style={styles.notes}>No edits yet.</Text>
+                  ) : (
+                    paymentAudits[p.id].map((a) => (
+                      <Text key={a.id} style={styles.notes}>
+                        {formatDate(a.edited_at.slice(0, 10))}: {formatCurrency(a.old_amount)} → {formatCurrency(a.new_amount)}
+                        {a.old_payment_date !== a.new_payment_date ? `, date ${formatDate(a.old_payment_date)} → ${formatDate(a.new_payment_date)}` : ''}
+                      </Text>
+                    ))
+                  )}
+                </View>
+              ) : null}
+            </Card>
+          )
+        )}
 
         <Text style={styles.sectionTitleLg}>WhatsApp Messages</Text>
         {messages.length === 0 ? (
@@ -303,7 +392,15 @@ export default function CustomerDetail() {
 
         <View style={styles.rulesHeader}>
           <Text style={styles.sectionTitleLg}>Recurring Deliveries</Text>
-          <Button label={showRuleForm ? 'Cancel' : '+ Add'} variant={showRuleForm ? 'neutral' : 'primary'} onPress={() => setShowRuleForm((v) => !v)} style={styles.smallButton} />
+          <Button
+            label={showRuleForm ? 'Cancel' : '+ Add'}
+            variant={showRuleForm ? 'neutral' : 'primary'}
+            onPress={() => {
+              setEditingRuleId(null);
+              setShowRuleForm((v) => !v);
+            }}
+            style={styles.smallButton}
+          />
         </View>
 
         {showRuleForm ? (
@@ -311,8 +408,10 @@ export default function CustomerDetail() {
             customerId={customer.id}
             items={items}
             existingRules={rules}
+            editingRule={rules.find((r) => r.id === editingRuleId) ?? null}
             onDone={() => {
               setShowRuleForm(false);
+              setEditingRuleId(null);
               load();
             }}
           />
@@ -335,6 +434,15 @@ export default function CustomerDetail() {
                 </Text>
               </View>
               <Button
+                label="Edit"
+                variant="ghost"
+                onPress={() => {
+                  setEditingRuleId(rule.id);
+                  setShowRuleForm(true);
+                }}
+                style={styles.smallButton}
+              />
+              <Button
                 label={rule.is_active ? 'Pause' : 'Resume'}
                 variant={rule.is_active ? 'neutral' : 'success'}
                 onPress={() => handleToggleRuleActive(rule)}
@@ -350,6 +458,7 @@ export default function CustomerDetail() {
 
 function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: () => void }) {
   const [name, setName] = useState(customer.name);
+  const [mobile, setMobile] = useState(customer.mobile);
   const [address, setAddress] = useState(customer.address);
   const [notes, setNotes] = useState(customer.delivery_notes ?? '');
   const [saving, setSaving] = useState(false);
@@ -357,17 +466,20 @@ function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: ()
 
   async function handleSave() {
     setError(null);
-    if (!name.trim() || !address.trim()) {
-      setError('Name and address are required.');
+    if (!name.trim() || !address.trim() || !mobile.trim()) {
+      setError('Name, mobile, and address are required.');
       return;
     }
     setSaving(true);
     try {
       const { error: updateError } = await supabase
         .from('customers')
-        .update({ name: name.trim(), address: address.trim(), delivery_notes: notes.trim() || null })
+        .update({ name: name.trim(), mobile: mobile.trim(), address: address.trim(), delivery_notes: notes.trim() || null })
         .eq('id', customer.id);
-      if (updateError) throw updateError;
+      if (updateError) {
+        if (updateError.code === '23505') throw new Error('Another customer in this shop already has that mobile number.');
+        throw updateError;
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save changes');
@@ -379,9 +491,10 @@ function EditCustomerForm({ customer, onDone }: { customer: Customer; onDone: ()
   return (
     <View style={{ gap: spacing.md }}>
       <TextField label="Name" value={name} onChangeText={setName} placeholder="Customer name" />
+      <TextField label="Mobile" value={mobile} onChangeText={setMobile} placeholder="Mobile number" keyboardType="phone-pad" />
       <TextField label="Address" value={address} onChangeText={setAddress} placeholder="Delivery address" multiline />
       <TextField label="Delivery notes (optional)" value={notes} onChangeText={setNotes} placeholder="e.g. leave with watchman" />
-      <Text style={styles.notes}>Mobile number can't be changed here since it's the customer's login.</Text>
+      <Text style={styles.notes}>Changing mobile only updates their saved contact number -- their login stays tied to the account created earlier and isn't affected.</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Button label="Save Changes" onPress={handleSave} loading={saving} />
     </View>
@@ -392,16 +505,18 @@ function RuleForm({
   customerId,
   items,
   existingRules,
+  editingRule,
   onDone,
 }: {
   customerId: string;
   items: Item[];
   existingRules: RecurringRule[];
+  editingRule: RecurringRule | null;
   onDone: () => void;
 }) {
-  const [itemId, setItemId] = useState<string | null>(items[0]?.id ?? null);
-  const [days, setDays] = useState<number[]>([]);
-  const [quantity, setQuantity] = useState('1');
+  const [itemId, setItemId] = useState<string | null>(editingRule?.item_id ?? items[0]?.id ?? null);
+  const [days, setDays] = useState<number[]>(editingRule?.days_of_week ?? []);
+  const [quantity, setQuantity] = useState(editingRule ? String(editingRule.quantity) : '1');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -426,23 +541,31 @@ function RuleForm({
     }
     setSaving(true);
     try {
-      const existing = existingRules.find((r) => r.item_id === itemId);
       const sortedDays = [...days].sort((a, b) => a - b);
-      if (existing) {
+      if (editingRule) {
         const { error: updateError } = await supabase
           .from('customer_recurring_rules')
-          .update({ days_of_week: sortedDays, quantity: qty, is_active: true })
-          .eq('id', existing.id);
+          .update({ days_of_week: sortedDays, quantity: qty })
+          .eq('id', editingRule.id);
         if (updateError) throw updateError;
       } else {
-        const { error: insertError } = await supabase.from('customer_recurring_rules').insert({
-          customer_id: customerId,
-          item_id: itemId,
-          days_of_week: sortedDays,
-          quantity: qty,
-          start_date: todayIso(),
-        });
-        if (insertError) throw insertError;
+        const existing = existingRules.find((r) => r.item_id === itemId);
+        if (existing) {
+          const { error: updateError } = await supabase
+            .from('customer_recurring_rules')
+            .update({ days_of_week: sortedDays, quantity: qty, is_active: true })
+            .eq('id', existing.id);
+          if (updateError) throw updateError;
+        } else {
+          const { error: insertError } = await supabase.from('customer_recurring_rules').insert({
+            customer_id: customerId,
+            item_id: itemId,
+            days_of_week: sortedDays,
+            quantity: qty,
+            start_date: todayIso(),
+          });
+          if (insertError) throw insertError;
+        }
       }
       onDone();
     } catch (e) {
@@ -458,9 +581,15 @@ function RuleForm({
         <Text style={styles.label}>Item</Text>
         <View style={styles.chipRow}>
           {items.map((i) => (
-            <Chip key={i.id} label={i.name} active={itemId === i.id} onPress={() => setItemId(i.id)} />
+            <Chip
+              key={i.id}
+              label={i.name}
+              active={itemId === i.id}
+              onPress={() => !editingRule && setItemId(i.id)}
+            />
           ))}
         </View>
+        {editingRule ? <Text style={styles.notes}>Item can't be changed on an existing recurring delivery -- add a new one instead.</Text> : null}
       </View>
       <View style={{ gap: 6 }}>
         <Text style={styles.label}>Days</Text>
@@ -526,6 +655,63 @@ function PaymentForm({
   );
 }
 
+function PaymentEditForm({
+  payment,
+  onDone,
+  onCancel,
+}: {
+  payment: Payment;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [paymentDate, setPaymentDate] = useState(payment.payment_date);
+  const [note, setNote] = useState(payment.note ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setError(null);
+    const n = Number(amount);
+    if (!amount || Number.isNaN(n) || n <= 0) {
+      setError('Enter a valid amount.');
+      return;
+    }
+    if (!paymentDate) {
+      setError('Enter a valid date.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error: rpcError } = await supabase.rpc('update_payment', {
+        p_payment_id: payment.id,
+        p_amount: n,
+        p_payment_date: paymentDate,
+        p_note: note.trim() || null,
+      });
+      if (rpcError) throw rpcError;
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save payment');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card style={{ gap: spacing.md }}>
+      <TextField label="Amount received" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+      <TextField label="Date (YYYY-MM-DD)" value={paymentDate} onChangeText={setPaymentDate} placeholder="2026-07-15" />
+      <TextField label="Note (optional)" value={note} onChangeText={setNote} placeholder="Cash / UPI" />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+        <Button label="Cancel" variant="neutral" onPress={onCancel} style={{ flex: 1 }} />
+        <Button label="Save" onPress={handleSave} loading={saving} style={{ flex: 1 }} />
+      </View>
+    </Card>
+  );
+}
+
 function msgBadgeStyleFor(status: WhatsAppLogRow['status']) {
   if (status === 'sent') return { backgroundColor: colors.success, borderColor: colors.success };
   if (status === 'failed') return { backgroundColor: colors.dangerBgSoft, borderColor: colors.dangerBorder };
@@ -544,8 +730,10 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   ruleCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   smallButton: { minHeight: 34, paddingVertical: 6, paddingHorizontal: spacing.md },
+  historyButton: { alignSelf: 'flex-start', minHeight: 24, paddingVertical: 2, paddingHorizontal: 0 },
   balance: { fontFamily: fonts.headingBold, fontSize: 24, color: colors.primary },
   billLink: { fontFamily: fonts.body, fontSize: 12, color: colors.textSecondary },
+  billNote: { fontFamily: fonts.body, fontSize: 12, color: colors.textMuted3 },
   msgBadge: { borderRadius: 999, borderWidth: 1, paddingVertical: 4, paddingHorizontal: spacing.sm },
   msgBadgeText: { fontFamily: fonts.bodySemiBold, fontSize: 11, color: colors.textMuted2, textTransform: 'capitalize' },
 });

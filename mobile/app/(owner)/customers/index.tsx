@@ -24,6 +24,7 @@ export default function OwnerCustomers() {
       .from('customers')
       .select('*')
       .eq('shop_id', shopId)
+      .is('deleted_at', null)
       .order('created_at', { ascending: true });
     setCustomers(data ?? []);
     setLoading(false);

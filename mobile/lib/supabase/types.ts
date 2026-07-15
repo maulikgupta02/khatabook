@@ -45,6 +45,7 @@ export type Customer = {
   internal_auth_email: string | null;
   is_active: boolean;
   created_at: string;
+  deleted_at: string | null;
 };
 
 export type RecurringRule = {
@@ -94,6 +95,20 @@ export type Payment = {
   note: string | null;
   recorded_by: string | null;
   created_at: string;
+};
+
+export type PaymentAudit = {
+  id: string;
+  payment_id: string;
+  shop_id: string;
+  edited_by: string | null;
+  edited_at: string;
+  old_amount: number;
+  new_amount: number;
+  old_payment_date: string;
+  new_payment_date: string;
+  old_note: string | null;
+  new_note: string | null;
 };
 
 export type ExpectedDelivery = {

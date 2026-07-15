@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { supabase } from '@/lib/supabase/client';
@@ -29,6 +29,8 @@ export default function PublicBill() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bill, setBill] = useState<BillResponse | null>(null);
+  const { width } = useWindowDimensions();
+  const isPhoneWidth = width < 480;
 
   useEffect(() => {
     let cancelled = false;
@@ -52,11 +54,11 @@ export default function PublicBill() {
   }, [token]);
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, isPhoneWidth && styles.wrapPhone]}>
       {/* Light background reaches the top here (centered card layout), so dark status
           bar icons read correctly against it. */}
       <StatusBar style="dark" />
-      <View style={styles.card}>
+      <View style={[styles.card, isPhoneWidth && styles.cardPhone]}>
         <View style={styles.header}>
           <View style={styles.logoCircle}>
             <Text style={styles.logoLetter}>{bill?.shopName?.[0]?.toUpperCase() ?? 'G'}</Text>
@@ -121,6 +123,7 @@ function SummaryStat({ label, value, emphasis }: { label: string; value: string;
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.bgPage, alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  wrapPhone: { padding: 0 },
   card: {
     width: '100%',
     maxWidth: 412,
@@ -130,6 +133,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
+  },
+  cardPhone: {
+    maxWidth: '100%',
+    maxHeight: undefined,
+    height: '100%',
+    borderRadius: 0,
+    borderWidth: 0,
   },
   header: { backgroundColor: colors.primary, padding: spacing.xxl, alignItems: 'center' },
   logoCircle: {

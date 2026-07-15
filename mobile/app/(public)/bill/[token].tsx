@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   },
   cardPhone: {
     maxWidth: '100%',
-    maxHeight: undefined,
+    maxHeight: '100%',
     height: '100%',
     borderRadius: 0,
     borderWidth: 0,

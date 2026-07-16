@@ -39,7 +39,7 @@ export default function DeliveryHistory() {
     if (!shopId) return;
     setLoading(true);
     const [{ data: customerRows }, { data: itemRows }, { data: recordRows }] = await Promise.all([
-      supabase.from('customers').select('*').eq('shop_id', shopId).is('deleted_at', null).order('name'),
+      supabase.from('customers').select('*').eq('shop_id', shopId).order('name'),
       supabase.from('items').select('*').eq('shop_id', shopId),
       supabase.from('delivery_records').select('*').eq('shop_id', shopId).eq('delivery_date', date).order('created_at'),
     ]);

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
 import { formatCurrency, formatMonth, formatDate, todayIso, currentMonthIso } from '@/lib/format';
@@ -99,9 +99,11 @@ export default function OwnerReports() {
     setRefreshing(false);
   }, [shopId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const loadMonthSales = useCallback(async (month: string) => {
     if (!shopId) return;
@@ -118,9 +120,11 @@ export default function OwnerReports() {
     setMonthSalesLoading(false);
   }, [shopId]);
 
-  useEffect(() => {
-    loadMonthSales(selectedMonth);
-  }, [loadMonthSales, selectedMonth]);
+  useFocusEffect(
+    useCallback(() => {
+      loadMonthSales(selectedMonth);
+    }, [loadMonthSales, selectedMonth])
+  );
 
   async function handleSaveCorrection(flag: FlagRow, quantity: number, note: string) {
     if (flag.delivery_records) {
@@ -248,7 +252,7 @@ export default function OwnerReports() {
       <ScreenHeader title="Reports" onSettingsPress={() => router.push('/(owner)/settings')} />
       <ScrollView
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); loadMonthSales(selectedMonth); }} />}
       >
         <Card style={{ gap: spacing.xs }}>
           <Text style={styles.label}>Today</Text>

@@ -30,6 +30,15 @@ Deno.serve(async (req) => {
     const internalEmail = `cust-${shopId}-${mobile}@internal.khatabook.app`;
     const password = defaultPassword();
 
+    const { data: existing } = await admin
+      .from('customers')
+      .select('id')
+      .eq('shop_id', shopId)
+      .eq('mobile', mobile)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (existing) throw new Error('This mobile number is already a customer');
+
     const { data: authUser, error: createAuthError } = await admin.auth.admin.createUser({
       email: internalEmail,
       password,

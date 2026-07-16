@@ -365,6 +365,12 @@ verify_jwt = false
 [functions.resolve-bill-token]
 verify_jwt = false
 
+# resolve-owner-login is called by shop owners who are not signed in yet (that's the
+# point of the endpoint), mirroring resolve-customer-login -- it does its own mobile+
+# password validation internally instead of requiring a verified user JWT.
+[functions.resolve-owner-login]
+verify_jwt = false
+
 # create-shop is an internal admin-only tool (no shop owner is signed in yet when a
 # shop is first created) -- it checks the service role key itself as the credential
 # instead of a user JWT, so the gateway's JWT check must be off too.

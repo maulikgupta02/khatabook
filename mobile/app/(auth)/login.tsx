@@ -16,7 +16,7 @@ type ShopSession = { shop_id: string; shop_name: string; access_token: string; r
 export default function Login() {
   const insets = useSafeAreaInsets();
   const [role, setRole] = useState<Role>('owner');
-  const [identifier, setIdentifier] = useState(''); // email (owner) or mobile (customer)
+  const [identifier, setIdentifier] = useState(''); // mobile, for both roles
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,38 +24,31 @@ export default function Login() {
 
   async function handleLogin() {
     setError(null);
-    if (role === 'customer' && !isValidLocalMobile(identifier)) {
+    if (!isValidLocalMobile(identifier)) {
       setError('Mobile number must be exactly 10 digits.');
       return;
     }
     setLoading(true);
     try {
-      if (role === 'owner') {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: identifier.trim(),
-          password,
-        });
-        if (signInError) throw signInError;
-        router.replace('/(owner)/today');
-      } else {
-        const { data, error: fnError } = await supabase.functions.invoke('resolve-customer-login', {
-          body: { mobile: toStoredMobile(identifier), password },
-        });
-        if (fnError || !data) {
-          throw new Error(await functionErrorMessage(fnError, 'Invalid mobile number or password'));
-        }
-        if (data.requires_shop_selection) {
-          setShopChoices(data.shops as ShopSession[]);
-          return;
-        }
-        if (!data.access_token) throw new Error('Invalid mobile number or password');
-        const { error: setSessionError } = await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-        });
-        if (setSessionError) throw setSessionError;
-        router.replace('/(customer)/home');
+      const fnName = role === 'owner' ? 'resolve-owner-login' : 'resolve-customer-login';
+      const homeRoute = role === 'owner' ? '/(owner)/today' : '/(customer)/home';
+      const { data, error: fnError } = await supabase.functions.invoke(fnName, {
+        body: { mobile: toStoredMobile(identifier), password },
+      });
+      if (fnError || !data) {
+        throw new Error(await functionErrorMessage(fnError, 'Invalid mobile number or password'));
       }
+      if (data.requires_shop_selection) {
+        setShopChoices(data.shops as ShopSession[]);
+        return;
+      }
+      if (!data.access_token) throw new Error('Invalid mobile number or password');
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      });
+      if (setSessionError) throw setSessionError;
+      router.replace(homeRoute);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -72,7 +65,7 @@ export default function Login() {
         refresh_token: shop.refresh_token,
       });
       if (setSessionError) throw setSessionError;
-      router.replace('/(customer)/home');
+      router.replace(role === 'owner' ? '/(owner)/today' : '/(customer)/home');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -87,7 +80,9 @@ export default function Login() {
         <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.xl }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Which shop?</Text>
-            <Text style={styles.subtitle}>You're a customer at more than one shop.</Text>
+            <Text style={styles.subtitle}>
+              {role === 'owner' ? "You're an owner at more than one shop." : "You're a customer at more than one shop."}
+            </Text>
           </View>
           <View style={styles.card}>
             {shopChoices.map((shop) => (
@@ -155,13 +150,13 @@ export default function Login() {
 
         <View style={styles.card}>
           <TextField
-            label={role === 'owner' ? 'Email' : 'Mobile Number (+91)'}
+            label="Mobile Number (+91)"
             value={identifier}
-            onChangeText={(v) => setIdentifier(role === 'owner' ? v : digitsOnly(v, 10))}
+            onChangeText={(v) => setIdentifier(digitsOnly(v, 10))}
             autoCapitalize="none"
-            keyboardType={role === 'owner' ? 'email-address' : 'number-pad'}
-            maxLength={role === 'owner' ? undefined : 10}
-            placeholder={role === 'owner' ? 'you@example.com' : '10-digit number'}
+            keyboardType="number-pad"
+            maxLength={10}
+            placeholder="10-digit number"
           />
           <TextField
             label="Password"

@@ -21,6 +21,7 @@ export default function CustomerBillMonth() {
   const [flags, setFlags] = useState<DeliveryFlag[]>([]);
   const [loading, setLoading] = useState(true);
   const [flaggingId, setFlaggingId] = useState<string | null>(null);
+  const [flagError, setFlagError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!customer || !month) return;
@@ -68,13 +69,21 @@ export default function CustomerBillMonth() {
 
   async function handleFlag(recordId: string, reason: string) {
     if (!customer || !reason.trim()) return;
-    await supabase.from('delivery_flags').insert({
+    setFlagError(null);
+    const { error } = await supabase.from('delivery_flags').insert({
       delivery_record_id: recordId,
       customer_id: customer.id,
       raised_by: customer.auth_user_id,
       reason_text: reason.trim(),
     });
+    if (error) {
+      setFlagError(
+        error.code === '23505' ? 'This delivery already has an open dispute.' : 'Could not submit the flag. Try again.'
+      );
+      return;
+    }
     setFlaggingId(null);
+    load();
   }
 
   if (customerLoading || loading) {
@@ -98,7 +107,12 @@ export default function CustomerBillMonth() {
           records.map((r) => {
             const flag = flagByRecord[r.id];
             return flaggingId === r.id ? (
-              <FlagForm key={r.id} onCancel={() => setFlaggingId(null)} onSubmit={(reason) => handleFlag(r.id, reason)} />
+              <FlagForm
+                key={r.id}
+                error={flagError}
+                onCancel={() => { setFlaggingId(null); setFlagError(null); }}
+                onSubmit={(reason) => handleFlag(r.id, reason)}
+              />
             ) : (
               <Card key={r.id} style={{ gap: spacing.xs }}>
                 <View style={styles.row}>
@@ -114,7 +128,7 @@ export default function CustomerBillMonth() {
                     {r.status === 'skipped' ? '—' : formatCurrency(Number(r.quantity) * Number(r.unit_price))}
                   </Text>
                   {!flag || flag.status !== 'open' ? (
-                    <Button label="Flag" variant="ghost" onPress={() => setFlaggingId(r.id)} style={styles.flagButton} />
+                    <Button label="Flag" variant="ghost" onPress={() => { setFlaggingId(r.id); setFlagError(null); }} style={styles.flagButton} />
                   ) : null}
                 </View>
                 {flag ? (
@@ -150,11 +164,20 @@ export default function CustomerBillMonth() {
   );
 }
 
-function FlagForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (reason: string) => void }) {
+function FlagForm({
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  error: string | null;
+  onCancel: () => void;
+  onSubmit: (reason: string) => void;
+}) {
   const [reason, setReason] = useState('');
   return (
     <Card style={{ gap: spacing.sm }}>
       <TextField label="What's wrong with this delivery?" value={reason} onChangeText={setReason} placeholder="e.g. quantity is wrong" />
+      {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         <Button label="Cancel" variant="neutral" onPress={onCancel} style={{ flex: 1 }} />
         <Button label="Submit Flag" onPress={() => onSubmit(reason)} style={{ flex: 1 }} />
@@ -175,4 +198,5 @@ const styles = StyleSheet.create({
   flagResolved: { fontFamily: fonts.bodyMedium, fontSize: 12.5, color: colors.success },
   flagDismissed: { fontFamily: fonts.bodyMedium, fontSize: 12.5, color: colors.textMuted },
   flagOpen: { fontFamily: fonts.body, fontSize: 11.5, color: colors.textSecondary, fontStyle: 'italic' },
+  error: { color: colors.dangerText, fontFamily: fonts.bodyMedium, fontSize: 13 },
 });

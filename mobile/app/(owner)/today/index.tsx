@@ -6,7 +6,7 @@ import * as Crypto from 'expo-crypto';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase/client';
 import { useShop } from '@/lib/supabase/useShop';
-import { formatCurrency, todayIso } from '@/lib/format';
+import { formatCurrency, todayIso, tomorrowIso } from '@/lib/format';
 import { OFFLINE_SUPPORTED } from '@/lib/offline/db';
 import { enqueueMutation, countPendingMutations, type QueuedMutation, listPendingMutations } from '@/lib/offline/queue';
 import { syncPendingMutations } from '@/lib/offline/sync';
@@ -50,7 +50,10 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = {
 
 export default function OwnerToday() {
   const { shopId, loading: shopLoading } = useShop();
-  const date = todayIso();
+  const [viewDay, setViewDay] = useState<'today' | 'tomorrow'>('today');
+  const isTomorrow = viewDay === 'tomorrow';
+  const date = isTomorrow ? tomorrowIso() : todayIso();
+  const [showStockSummary, setShowStockSummary] = useState(true);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [itemPrices, setItemPrices] = useState<Record<string, number>>({});
@@ -250,6 +253,18 @@ export default function OwnerToday() {
   const pendingDeliveryCount = rows.filter((r) => !r.isExtra && r.recordId === null).length;
   const doneCount = rows.filter((r) => r.recordId !== null).length;
 
+  const stockSummary = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of rows) {
+      const qty = row.expectedQuantity ?? row.actualQuantity ?? 0;
+      totals.set(row.itemId, (totals.get(row.itemId) ?? 0) + qty);
+    }
+    return [...totals.entries()]
+      .filter(([itemId]) => itemMap[itemId])
+      .map(([itemId, qty]) => ({ itemId, qty, name: itemMap[itemId].name, unit: itemMap[itemId].unit }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows, itemMap]);
+
   async function queueMarkDelivery(row: Row, patch: { quantity: number; status: DeliveryStatus }) {
     if (!shopId) return;
     const clientMutationId = Crypto.randomUUID();
@@ -400,17 +415,48 @@ export default function OwnerToday() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPage }}>
       <ScreenHeader
-        title="Today's Deliveries"
-        subtitle={`${doneCount} of ${rows.length} done · ${pendingDeliveryCount} pending${usingCache ? ' · offline (cached)' : ''}`}
+        title={isTomorrow ? "Tomorrow's Deliveries" : "Today's Deliveries"}
+        subtitle={
+          isTomorrow
+            ? `${rows.length} item${rows.length === 1 ? '' : 's'} expected${usingCache ? ' · offline (cached)' : ''}`
+            : `${doneCount} of ${rows.length} done · ${pendingDeliveryCount} pending${usingCache ? ' · offline (cached)' : ''}`
+        }
         onSettingsPress={() => router.push('/(owner)/settings')}
       />
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
+        <View style={styles.chipRow}>
+          <Chip label="Today" active={!isTomorrow} onPress={() => setViewDay('today')} />
+          <Chip label="Tomorrow" active={isTomorrow} onPress={() => setViewDay('tomorrow')} />
+        </View>
+
         <Pressable onPress={() => router.push('/(owner)/today/history')} style={styles.historyLink}>
           <Text style={styles.historyLinkText}>Past Deliveries ›</Text>
         </Pressable>
+
+        {isTomorrow && stockSummary.length > 0 ? (
+          <Card style={{ gap: spacing.sm }}>
+            <Pressable
+              onPress={() => setShowStockSummary((v) => !v)}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <Text style={styles.customerName}>Stock needed for tomorrow</Text>
+              <Ionicons name={showStockSummary ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+            </Pressable>
+            {showStockSummary
+              ? stockSummary.map((s) => (
+                  <View key={s.itemId} style={[styles.row, { justifyContent: 'space-between' }]}>
+                    <Text style={styles.itemLine}>{s.name}</Text>
+                    <Text style={styles.qtyLine}>
+                      {s.qty} {s.unit}
+                    </Text>
+                  </View>
+                ))
+              : null}
+          </Card>
+        ) : null}
 
         {queuedCount > 0 ? (
           <Card style={styles.syncBanner}>
@@ -421,18 +467,20 @@ export default function OwnerToday() {
           </Card>
         ) : null}
 
-        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-          <Button
-            label={`Complete (${pendingDeliveryCount})`}
-            onPress={handleCompleteRemaining}
-            loading={bulkSaving}
-            disabled={pendingDeliveryCount === 0}
-            style={{ flex: 1 }}
-          />
-          <Button label={showExtraForm ? 'Cancel' : '+ Extra'} variant="neutral" onPress={() => setShowExtraForm((v) => !v)} style={{ flex: 1 }} />
-        </View>
+        {!isTomorrow ? (
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            <Button
+              label={`Complete (${pendingDeliveryCount})`}
+              onPress={handleCompleteRemaining}
+              loading={bulkSaving}
+              disabled={pendingDeliveryCount === 0}
+              style={{ flex: 1 }}
+            />
+            <Button label={showExtraForm ? 'Cancel' : '+ Extra'} variant="neutral" onPress={() => setShowExtraForm((v) => !v)} style={{ flex: 1 }} />
+          </View>
+        ) : null}
 
-        {showExtraForm ? (
+        {!isTomorrow && showExtraForm ? (
           <ExtraItemForm customers={customers} items={items} onSave={handleAddExtra} />
         ) : null}
 
@@ -441,7 +489,13 @@ export default function OwnerToday() {
         ) : null}
 
         {rowsByCustomer.length === 0 ? (
-          <ComingSoon note="No deliveries expected today. Set up customers and recurring items to see them here." />
+          <ComingSoon
+            note={
+              isTomorrow
+                ? 'No deliveries expected tomorrow. Set up customers and recurring items to see them here.'
+                : 'No deliveries expected today. Set up customers and recurring items to see them here.'
+            }
+          />
         ) : null}
 
         {rowsByCustomer.length > 0 && filteredRowsByCustomer.length === 0 ? (
@@ -479,7 +533,7 @@ export default function OwnerToday() {
                       <Text style={styles.badgeText}>{STATUS_LABEL[row.status]}</Text>
                     </View>
                   ) : null}
-                  {row.isExtra ? (
+                  {isTomorrow ? null : row.isExtra ? (
                     <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
                   ) : row.recordId === null ? (
                     <View style={styles.actionRow}>
@@ -490,7 +544,7 @@ export default function OwnerToday() {
                   ) : (
                     <Button label="Edit" variant="ghost" onPress={() => setEditingKey(row.key)} style={styles.smallButton} />
                   )}
-                  {row.recordId !== null ? (
+                  {!isTomorrow && row.recordId !== null ? (
                     <Pressable onPress={() => setDeleteTarget(row)} style={styles.iconButton} hitSlop={8}>
                       <Ionicons name="trash-outline" size={18} color={colors.dangerText} />
                     </Pressable>

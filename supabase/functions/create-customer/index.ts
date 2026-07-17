@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
       .eq('mobile', mobile)
       .is('deleted_at', null)
       .maybeSingle();
-    if (existing) throw new Error('This mobile number is already a customer');
+    if (existing) throw new Error('This mobile number is already registered to an existing customer');
 
     const { data: authUser, error: createAuthError } = await admin.auth.admin.createUser({
       email: internalEmail,
@@ -64,16 +64,17 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       await admin.auth.admin.deleteUser(authUser.user.id);
-      throw new Error(insertError.message.includes('duplicate') ? 'This mobile number is already a customer' : insertError.message);
+      throw new Error(insertError.message.includes('duplicate') ? 'This mobile number is already registered to an existing customer' : insertError.message);
     }
 
     const { data: shop } = await admin.from('shops').select('name').eq('id', shopId).single();
+    const webBaseUrl = Deno.env.get('PUBLIC_WEB_BASE_URL') ?? 'http://localhost:8081';
     await sendWhatsApp(admin, {
       shopId,
       customerId: customer.id,
       to: mobile,
-      templateName: 'customer_welcome_v4',
-      bodyParams: [shop?.name ?? 'your shop'],
+      templateName: 'customer_welcome_v5',
+      bodyParams: [shop?.name ?? 'your shop', webBaseUrl],
     });
 
     return new Response(JSON.stringify({ customer, password }), {

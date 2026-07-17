@@ -40,11 +40,17 @@ export function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+export function tomorrowIso() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export function currentMonthIso() {
   return new Date().toISOString().slice(0, 7); // YYYY-MM
 }
 
-const MONTH_NAMES = [
+export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];

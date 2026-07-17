@@ -60,11 +60,15 @@ export default function PublicBill() {
       <StatusBar style="dark" />
       <View style={[styles.card, isPhoneWidth && styles.cardPhone]}>
         <View style={styles.header}>
-          <View style={styles.logoCircle}>
-            <Text style={styles.logoLetter}>{bill?.shopName?.[0]?.toUpperCase() ?? 'G'}</Text>
-          </View>
-          <Text style={styles.shopName}>{bill?.shopName ?? 'Gupta Dairy'}</Text>
-          {bill ? <Text style={styles.subhead}>{formatMonth(bill.month)} bill for {bill.customerName}</Text> : null}
+          {bill ? (
+            <>
+              <View style={styles.logoCircle}>
+                <Text style={styles.logoLetter}>{bill.shopName?.[0]?.toUpperCase() ?? '?'}</Text>
+              </View>
+              <Text style={styles.shopName}>{bill.shopName}</Text>
+              <Text style={styles.subhead}>{formatMonth(bill.month)} bill for {bill.customerName}</Text>
+            </>
+          ) : null}
         </View>
         <View style={styles.body}>
           {loading ? (

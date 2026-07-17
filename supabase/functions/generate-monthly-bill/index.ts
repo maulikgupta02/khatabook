@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
         customerId: customer.id,
         to: customer.mobile,
         templateName: 'bill_ready',
-        bodyParams: [shop?.name ?? 'your shop', month, totalAmount.toFixed(2), `${webBaseUrl}/bill/${token}`],
+        bodyParams: [shop?.name ?? 'your shop', month, Number(pendingBalance).toFixed(2), `${webBaseUrl}/bill/${token}`],
       });
       whatsappSent = true;
     }

@@ -68,12 +68,13 @@ Deno.serve(async (req) => {
       throw new Error(profileError.message);
     }
 
+    const webBaseUrl = Deno.env.get('PUBLIC_WEB_BASE_URL') ?? 'http://localhost:8081';
     await sendWhatsApp(admin, {
       shopId: shop.id,
       customerId: null,
       to: storedPhone,
-      templateName: 'shop_owner_welcome_v4',
-      bodyParams: [owner_name, shop_name],
+      templateName: 'shop_owner_welcome_v5',
+      bodyParams: [owner_name, shop_name, webBaseUrl],
     });
 
     return new Response(JSON.stringify({ shop, password }), {
